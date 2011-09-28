@@ -6,6 +6,7 @@
 #include <v8.h>
 #include <node.h>
 #include <node_buffer.h>
+#include <pthread.h>
 
 extern "C" {
 #include "geocache.h"
@@ -27,8 +28,16 @@ using namespace std;
       String::New("Argument " #I " must be a string")));                \
   String::Utf8Value VAR(args[I]->ToString());
 
+#define REQ_FUN_ARG(I, VAR)                                \
+  if (args.Length() <= (I) || !args[I]->IsFunction())      \
+    return ThrowException(Exception::TypeError(            \
+      String::New("Argument " #I " must be a function"))); \
+  Local<Function> VAR = Local<Function>::Cast(args[I]);
+
 #define THROW_CSTR_ERROR(TYPE, STR)                             \
 return ThrowException(Exception::TYPE(String::New(STR)));
+
+pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct geocache_context_fcgi geocache_context_fcgi;
 typedef struct geocache_context_fcgi_request geocache_context_fcgi_request;
@@ -105,6 +114,20 @@ static geocache_context_fcgi* fcgi_context_create() {
   return ctx;
 }
 
+/* The structure used for passing geocache data asynchronously between
+   threads using libeio */
+class GeoCache;                 // forward declaration for this structure
+struct cache_request {
+  Persistent<Function> cb;
+  GeoCache* cache;
+  char *baseUrl;
+  char *pathInfo;
+  char *queryString;
+  char *data;
+  size_t data_len;
+  long code;
+  apr_time_t mtime;
+};
 
 // keys for the http response object
 static Persistent<String> code_symbol;
@@ -119,6 +142,9 @@ private:
   geocache_context_fcgi* globalctx;
   geocache_context* ctx;
   geocache_cfg *cfg;
+
+  static int EIO_Get(eio_req *req);
+  static int EIO_GetAfter(eio_req *req);
 public:
 
   static Persistent<FunctionTemplate> s_ct;
@@ -137,10 +163,9 @@ public:
     mtime_symbol = NODE_PSYMBOL("mtime");
     headers_symbol = NODE_PSYMBOL("headers");
     
-    NODE_SET_PROTOTYPE_METHOD(s_ct, "get", Get);
+    NODE_SET_PROTOTYPE_METHOD(s_ct, "get", GetAsync);
 
-    target->Set(String::NewSymbol("GeoCache"),
-                s_ct->GetFunction());
+    target->Set(String::NewSymbol("GeoCache"), s_ct->GetFunction());
   }
 
   GeoCache() :
@@ -200,109 +225,204 @@ public:
     return args.This();
   }
 
-  static Handle<Value> Get(const Arguments& args)
+  static Handle<Value> GetAsync(const Arguments& args)
   {
     HandleScope scope;
-    const char *usage = "usage: cache.get(baseUrl, pathInfo, queryString)";
-    if (args.Length() != 3) {
+    const char *usage = "usage: cache.get(baseUrl, pathInfo, queryString, callback)";
+    if (args.Length() != 4) {
       THROW_CSTR_ERROR(Error, usage);
     }
     REQ_STR_ARG(0, baseUrl);
     REQ_STR_ARG(1, pathInfo);
     REQ_STR_ARG(2, queryString);
+    REQ_FUN_ARG(3, cb);
 
-    GeoCache* gc = ObjectWrap::Unwrap<GeoCache>(args.This());
-
-    apr_table_t *params;
-    apr_pool_create(&(gc->ctx->pool), global_pool);
-    geocache_request *request = NULL;
-    geocache_http_response *http_response = NULL;
-
-    // parse the query string and dispatch the request
-    params = geocache_http_parse_param_string(gc->ctx, *queryString);
-
-    cout << "got params for " << *queryString << endl;
-    
-    geocache_service_dispatch_request(gc->ctx ,&request, *pathInfo, params, gc->cfg);
-    if(GC_HAS_ERROR(gc->ctx) || !request) {
-      http_response = geocache_core_respond_to_error(gc->ctx, (request) ? request->service : NULL);
-    } else {
-      if(request->type == GEOCACHE_REQUEST_GET_CAPABILITIES) {
-        geocache_request_get_capabilities *req = (geocache_request_get_capabilities*)request;
-        http_response = geocache_core_get_capabilities(gc->ctx, request->service, req, *baseUrl, *pathInfo, gc->cfg);
-      } else if( request->type == GEOCACHE_REQUEST_GET_TILE) {
-        geocache_request_get_tile *req_tile = (geocache_request_get_tile*)request;
-        http_response = geocache_core_get_tile(gc->ctx, req_tile);
-      } else if( request->type == GEOCACHE_REQUEST_PROXY ) {
-        geocache_request_proxy *req_proxy = (geocache_request_proxy*)request;
-        http_response = geocache_core_proxy_request(gc->ctx, req_proxy);
-      } else if( request->type == GEOCACHE_REQUEST_GET_MAP) {
-        geocache_request_get_map *req_map = (geocache_request_get_map*)request;
-        http_response = geocache_core_get_map(gc->ctx, req_map);
-      } else if( request->type == GEOCACHE_REQUEST_GET_FEATUREINFO) {
-        geocache_request_get_feature_info *req_fi = (geocache_request_get_feature_info*)request;
-        http_response = geocache_core_get_featureinfo(gc->ctx, req_fi);
-      } else {
-        gc->ctx->set_error(gc->ctx, 500, (char*)"###BUG### unknown request type");
-      }
-
-      if(GC_HAS_ERROR(gc->ctx)) {
-        http_response = geocache_core_respond_to_error(gc->ctx, request->service);
-      } else if(!http_response) {
-        gc->ctx->set_error(gc->ctx, 500, (char*)"###BUG### NULL response");
-        http_response = geocache_core_respond_to_error(gc->ctx, request->service);
-      }
+    cache_request *cache_req = (cache_request *)malloc(sizeof(struct cache_request));
+    if (!cache_req) {
+      THROW_CSTR_ERROR(Error, "malloc in GeoCache::GetAsync failed.");
     }
 
+    GeoCache* cache = ObjectWrap::Unwrap<GeoCache>(args.This());
+
+    cache_req->cache = cache;
+    cache_req->cb = Persistent<Function>::New(cb);
+    cache_req->baseUrl = strdup(*baseUrl);
+
+    if (!cache_req->baseUrl) {
+      free(cache_req);
+      THROW_CSTR_ERROR(Error, "malloc in GeoCache::GetAsync failed.");
+    }
+    
+    cache_req->pathInfo = strdup(*pathInfo);
+    if (!cache_req->pathInfo) {
+      free(cache_req->baseUrl);
+      free(cache_req);
+      THROW_CSTR_ERROR(Error, "malloc in GeoCache::GetAsync failed.");
+    }
+    
+    cache_req->queryString = strdup(*queryString);
+    if (!cache_req->queryString) {
+      free(cache_req->pathInfo);
+      free(cache_req->baseUrl);
+      free(cache_req);
+      THROW_CSTR_ERROR(Error, "malloc in GeoCache::GetAsync failed.");
+    }
+
+    cache_req->code = 0;
+    cache_req->data = NULL;
+    cache_req->data_len = 0;
+    cache_req->mtime = (apr_time_t) 0;
+
+    cache->Ref(); // increment reference count so cache is not garbage collected
+
+    eio_custom(EIO_Get, EIO_PRI_DEFAULT, EIO_GetAfter, cache_req);
+
+    ev_ref(EV_DEFAULT_UC);
+
+    return Undefined();
+  }    
+};
+
+int GeoCache::EIO_Get(eio_req *req) {
+  cache_request *cache_req = (cache_request *)req->data;
+  GeoCache *gc = (GeoCache *)cache_req->cache;
+
+  pthread_mutex_lock(&queue_mutex);
+
+  apr_table_t *params;
+  apr_pool_create(&(gc->ctx->pool), global_pool);
+  geocache_request *request = NULL;
+  geocache_http_response *http_response = NULL;
+
+  // parse the query string and dispatch the request
+  params = geocache_http_parse_param_string(gc->ctx, cache_req->queryString);
+
+  cout << "got params for " << cache_req->queryString << endl;
+    
+  geocache_service_dispatch_request(gc->ctx ,&request, cache_req->pathInfo, params, gc->cfg);
+  if (GC_HAS_ERROR(gc->ctx) || !request) {
+    http_response = geocache_core_respond_to_error(gc->ctx, (request) ? request->service : NULL);
+  } else {
+    if (request->type == GEOCACHE_REQUEST_GET_CAPABILITIES) {
+      geocache_request_get_capabilities *req = (geocache_request_get_capabilities*)request;
+      http_response = geocache_core_get_capabilities(gc->ctx, request->service, req, cache_req->baseUrl, cache_req->pathInfo, gc->cfg);
+    } else if ( request->type == GEOCACHE_REQUEST_GET_TILE) {
+      geocache_request_get_tile *req_tile = (geocache_request_get_tile*)request;
+      http_response = geocache_core_get_tile(gc->ctx, req_tile);
+    } else if ( request->type == GEOCACHE_REQUEST_PROXY ) {
+      geocache_request_proxy *req_proxy = (geocache_request_proxy*)request;
+      http_response = geocache_core_proxy_request(gc->ctx, req_proxy);
+    } else if ( request->type == GEOCACHE_REQUEST_GET_MAP) {
+      geocache_request_get_map *req_map = (geocache_request_get_map*)request;
+      http_response = geocache_core_get_map(gc->ctx, req_map);
+    } else if ( request->type == GEOCACHE_REQUEST_GET_FEATUREINFO) {
+      geocache_request_get_feature_info *req_fi = (geocache_request_get_feature_info*)request;
+      http_response = geocache_core_get_featureinfo(gc->ctx, req_fi);
+    } else {
+      gc->ctx->set_error(gc->ctx, 500, (char*)"###BUG### unknown request type");
+    }
+
+    if (GC_HAS_ERROR(gc->ctx)) {
+      http_response = geocache_core_respond_to_error(gc->ctx, request->service);
+    } 
+  }
+
+  if (!http_response) {
+    gc->ctx->set_error(gc->ctx, 500, (char*)"###BUG### NULL response");
+    http_response = geocache_core_respond_to_error(gc->ctx, request->service);
+  }
+
+  // copy the response to the baton structure
+  cache_req->code = http_response->code;
+  cache_req->mtime = http_response->mtime;
+  cache_req->data = strndup((char *)http_response->data->buf, http_response->data->size);
+  cache_req->data_len = http_response->data->size;
+  
+  apr_pool_destroy(gc->ctx->pool);
+  gc->ctx->clear_errors(gc->ctx);
+
+  pthread_mutex_unlock(&queue_mutex);
+
+  return 0;
+}
+
+int GeoCache::EIO_GetAfter(eio_req *req) {
+  HandleScope scope;
+
+  ev_unref(EV_DEFAULT_UC);
+  cache_request *cache_req = (cache_request *)req->data;
+  GeoCache *gc = cache_req->cache;
+
+  Handle<Value> argv[2];
+
+  if (!cache_req->data) {       // this should be a malloc error set earlier in EIO_Get
+    argv[0] = Exception::Error(String::New("No response was received from the cache"));
+    argv[1] = Undefined();
+  } else {
     // convert the http_response to a javascript object
     Local<Object> result = Object::New();
-    result->Set(code_symbol, Integer::New(http_response->code)); // the HTTP response code
+    result->Set(code_symbol, Integer::New(cache_req->code)); // the HTTP response code
 
     // set the mtime to as a javascript date
-    if (http_response->mtime) {
-      result->Set(mtime_symbol, Date::New(apr_time_as_msec(http_response->mtime)));
+    if (cache_req->mtime) {
+      result->Set(mtime_symbol, Date::New(apr_time_as_msec(cache_req->mtime)));
     }
 
     // set the response data as a Node Buffer object
-    if (http_response->data) {
-      result->Set(data_symbol, Buffer::New((char*)http_response->data->buf, http_response->data->size)->handle_);
+    if (cache_req->data) {
+      result->Set(data_symbol, Buffer::New(cache_req->data, cache_req->data_len)->handle_);
     }
 
     // Set the response headers as a javascript object with header
     // names as keys and header values as an array. Header values are
     // in an array as more than one header of the same name can be
     // set.
-    if(http_response->headers && !apr_is_empty_table(http_response->headers)) {
+    /*if (response->headers && !apr_is_empty_table(response->headers)) {
       Local<Object> headers = Object::New();
-      const apr_array_header_t *elts = apr_table_elts(http_response->headers);
+      const apr_array_header_t *elts = apr_table_elts(response->headers);
       int i;
-      for(i = 0; i < elts->nelts; i++) {
-         apr_table_entry_t entry = APR_ARRAY_IDX(elts, i, apr_table_entry_t);
-         Local<Array> values;
-         Local<String> key = String::New(entry.key);
-         Local<String> value = String::New(entry.val);
-         if (headers->Has(key)) {
-           // the header exists: append the value
-           values = Local<Array>::Cast(headers->Get(key));
-           values->Set(values->Length() - 1, value);
-         } else {
-           // create a new header
-           values = Array::New(1);
-           values->Set(0, value);
-           headers->Set(key, values);
-         }
+      for (i = 0; i < elts->nelts; i++) {
+        apr_table_entry_t entry = APR_ARRAY_IDX(elts, i, apr_table_entry_t);
+        Local<Array> values;
+        Local<String> key = String::New(entry.key);
+        Local<String> value = String::New(entry.val);
+        if (headers->Has(key)) {
+          // the header exists: append the value
+          values = Local<Array>::Cast(headers->Get(key));
+          values->Set(values->Length() - 1, value);
+        } else {
+          // create a new header
+          values = Array::New(1);
+          values->Set(0, value);
+          headers->Set(key, values);
+        }
       }
       result->Set(headers_symbol, headers);
-   }
-    
-    // clean up
-    apr_pool_destroy(gc->ctx->pool);
-    gc->ctx->clear_errors(gc->ctx);
+      }*/
 
-    return scope.Close(result);
+    argv[0] = Undefined();
+    argv[1] = result;
   }
 
-};
+  // pass the results to the user specified callback function
+  TryCatch try_catch;
+  cache_req->cb->Call(Context::GetCurrent()->Global(), 2, argv);
+  if (try_catch.HasCaught()) {
+    FatalException(try_catch);
+  }
+  
+  // clean up
+  cache_req->cb.Dispose();
+
+  gc->Unref();
+
+  free(cache_req->queryString);
+  free(cache_req->pathInfo);
+  free(cache_req->baseUrl);
+  free(cache_req);
+
+  return 0;
+}
 
 Persistent<FunctionTemplate> GeoCache::s_ct;
 
