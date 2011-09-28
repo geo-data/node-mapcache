@@ -6,7 +6,6 @@
 #include <v8.h>
 #include <node.h>
 #include <node_buffer.h>
-#include <pthread.h>
 
 extern "C" {
 #include "geocache.h"
@@ -36,8 +35,6 @@ using namespace std;
 
 #define THROW_CSTR_ERROR(TYPE, STR)                             \
 return ThrowException(Exception::TYPE(String::New(STR)));
-
-pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct geocache_context_fcgi geocache_context_fcgi;
 typedef struct geocache_context_fcgi_request geocache_context_fcgi_request;
@@ -100,12 +97,12 @@ void geocache_fcgi_mutex_release(geocache_context *gctx) {
   ctx->mutex_file = NULL;
 }
 
-static geocache_context_fcgi* fcgi_context_create() {
-  geocache_context_fcgi *ctx = (geocache_context_fcgi *)apr_pcalloc(global_pool, sizeof(geocache_context_fcgi));
+static geocache_context_fcgi* fcgi_context_create(apr_pool_t *pool) {
+  geocache_context_fcgi *ctx = (geocache_context_fcgi *)apr_pcalloc(pool, sizeof(geocache_context_fcgi));
   if(!ctx) {
     return NULL;
   }
-  ctx->ctx.pool = global_pool;
+  ctx->ctx.pool = pool;
   geocache_context_init((geocache_context*)ctx);
   ctx->ctx.log = fcgi_context_log;
   ctx->mutex_fname= (char *)"/tmp/geocache.fcgi.lock";
@@ -119,14 +116,12 @@ static geocache_context_fcgi* fcgi_context_create() {
 class GeoCache;                 // forward declaration for this structure
 struct cache_request {
   Persistent<Function> cb;
-  GeoCache* cache;
+  GeoCache *cache;
+  geocache_context* ctx;
   char *baseUrl;
   char *pathInfo;
   char *queryString;
-  char *data;
-  size_t data_len;
-  long code;
-  apr_time_t mtime;
+  geocache_http_response *response;
 };
 
 // keys for the http response object
@@ -169,7 +164,7 @@ public:
   }
 
   GeoCache() :
-    globalctx(fcgi_context_create()),
+    globalctx(fcgi_context_create(global_pool)),
     ctx(NULL),
     cfg(NULL)
   {
@@ -237,41 +232,48 @@ public:
     REQ_STR_ARG(2, queryString);
     REQ_FUN_ARG(3, cb);
 
-    cache_request *cache_req = (cache_request *)malloc(sizeof(struct cache_request));
+    GeoCache* cache = ObjectWrap::Unwrap<GeoCache>(args.This());
+    
+    // create the pool for this request
+    apr_pool_t *req_pool = NULL;
+    if (apr_pool_create(&req_pool, global_pool) != APR_SUCCESS) {
+      THROW_CSTR_ERROR(Error, "Could not create the geocache request memory pool");
+    }
+
+    cache_request *cache_req = (cache_request *)apr_pcalloc(req_pool, sizeof(struct cache_request));
     if (!cache_req) {
+      apr_pool_destroy(req_pool);
       THROW_CSTR_ERROR(Error, "malloc in GeoCache::GetAsync failed.");
     }
 
-    GeoCache* cache = ObjectWrap::Unwrap<GeoCache>(args.This());
+    geocache_context_fcgi* req_ctx = fcgi_context_create(req_pool);
+    if (!req_ctx) {
+      apr_pool_destroy(req_pool);
+      THROW_CSTR_ERROR(Error, "Could not create the request context.");
+    }
 
+    cache_req->ctx = (geocache_context *) req_ctx;
+    cache_req->ctx->config = cache->ctx->config;
     cache_req->cache = cache;
     cache_req->cb = Persistent<Function>::New(cb);
-    cache_req->baseUrl = strdup(*baseUrl);
 
+    cache_req->baseUrl = apr_pstrdup(req_pool, *baseUrl);
     if (!cache_req->baseUrl) {
-      free(cache_req);
+      apr_pool_destroy(req_pool);
       THROW_CSTR_ERROR(Error, "malloc in GeoCache::GetAsync failed.");
     }
     
-    cache_req->pathInfo = strdup(*pathInfo);
+    cache_req->pathInfo = apr_pstrdup(req_pool, *pathInfo);
     if (!cache_req->pathInfo) {
-      free(cache_req->baseUrl);
-      free(cache_req);
+      apr_pool_destroy(req_pool);
       THROW_CSTR_ERROR(Error, "malloc in GeoCache::GetAsync failed.");
     }
     
-    cache_req->queryString = strdup(*queryString);
+    cache_req->queryString = apr_pstrdup(req_pool, *queryString);
     if (!cache_req->queryString) {
-      free(cache_req->pathInfo);
-      free(cache_req->baseUrl);
-      free(cache_req);
+      apr_pool_destroy(req_pool);
       THROW_CSTR_ERROR(Error, "malloc in GeoCache::GetAsync failed.");
     }
-
-    cache_req->code = 0;
-    cache_req->data = NULL;
-    cache_req->data_len = 0;
-    cache_req->mtime = (apr_time_t) 0;
 
     cache->Ref(); // increment reference count so cache is not garbage collected
 
@@ -283,65 +285,53 @@ public:
   }    
 };
 
+// This is run in a separate thread: *No* contact should be made with
+// the Node/V8 world here.
 int GeoCache::EIO_Get(eio_req *req) {
   cache_request *cache_req = (cache_request *)req->data;
-  GeoCache *gc = (GeoCache *)cache_req->cache;
-
-  pthread_mutex_lock(&queue_mutex);
+  geocache_context *ctx = cache_req->ctx;
 
   apr_table_t *params;
-  apr_pool_create(&(gc->ctx->pool), global_pool);
   geocache_request *request = NULL;
   geocache_http_response *http_response = NULL;
 
   // parse the query string and dispatch the request
-  params = geocache_http_parse_param_string(gc->ctx, cache_req->queryString);
+  params = geocache_http_parse_param_string(ctx, cache_req->queryString);
 
-  cout << "got params for " << cache_req->queryString << endl;
-    
-  geocache_service_dispatch_request(gc->ctx ,&request, cache_req->pathInfo, params, gc->cfg);
-  if (GC_HAS_ERROR(gc->ctx) || !request) {
-    http_response = geocache_core_respond_to_error(gc->ctx, (request) ? request->service : NULL);
+  geocache_service_dispatch_request(ctx ,&request, cache_req->pathInfo, params, ctx->config);
+  if (GC_HAS_ERROR(ctx) || !request) {
+    http_response = geocache_core_respond_to_error(ctx, (request) ? request->service : NULL);
   } else {
     if (request->type == GEOCACHE_REQUEST_GET_CAPABILITIES) {
       geocache_request_get_capabilities *req = (geocache_request_get_capabilities*)request;
-      http_response = geocache_core_get_capabilities(gc->ctx, request->service, req, cache_req->baseUrl, cache_req->pathInfo, gc->cfg);
+      http_response = geocache_core_get_capabilities(ctx, request->service, req, cache_req->baseUrl, cache_req->pathInfo, ctx->config);
     } else if ( request->type == GEOCACHE_REQUEST_GET_TILE) {
       geocache_request_get_tile *req_tile = (geocache_request_get_tile*)request;
-      http_response = geocache_core_get_tile(gc->ctx, req_tile);
+      http_response = geocache_core_get_tile(ctx, req_tile);
     } else if ( request->type == GEOCACHE_REQUEST_PROXY ) {
       geocache_request_proxy *req_proxy = (geocache_request_proxy*)request;
-      http_response = geocache_core_proxy_request(gc->ctx, req_proxy);
+      http_response = geocache_core_proxy_request(ctx, req_proxy);
     } else if ( request->type == GEOCACHE_REQUEST_GET_MAP) {
       geocache_request_get_map *req_map = (geocache_request_get_map*)request;
-      http_response = geocache_core_get_map(gc->ctx, req_map);
+      http_response = geocache_core_get_map(ctx, req_map);
     } else if ( request->type == GEOCACHE_REQUEST_GET_FEATUREINFO) {
       geocache_request_get_feature_info *req_fi = (geocache_request_get_feature_info*)request;
-      http_response = geocache_core_get_featureinfo(gc->ctx, req_fi);
+      http_response = geocache_core_get_featureinfo(ctx, req_fi);
     } else {
-      gc->ctx->set_error(gc->ctx, 500, (char*)"###BUG### unknown request type");
+      ctx->set_error(ctx, 500, (char*)"###BUG### unknown request type");
     }
 
-    if (GC_HAS_ERROR(gc->ctx)) {
-      http_response = geocache_core_respond_to_error(gc->ctx, request->service);
+    if (GC_HAS_ERROR(ctx)) {
+      http_response = geocache_core_respond_to_error(ctx, request->service);
     } 
   }
 
   if (!http_response) {
-    gc->ctx->set_error(gc->ctx, 500, (char*)"###BUG### NULL response");
-    http_response = geocache_core_respond_to_error(gc->ctx, request->service);
+    ctx->set_error(ctx, 500, (char*)"###BUG### NULL response");
+    http_response = geocache_core_respond_to_error(ctx, request->service);
   }
 
-  // copy the response to the baton structure
-  cache_req->code = http_response->code;
-  cache_req->mtime = http_response->mtime;
-  cache_req->data = strndup((char *)http_response->data->buf, http_response->data->size);
-  cache_req->data_len = http_response->data->size;
-  
-  apr_pool_destroy(gc->ctx->pool);
-  gc->ctx->clear_errors(gc->ctx);
-
-  pthread_mutex_unlock(&queue_mutex);
+  cache_req->response = http_response;
 
   return 0;
 }
@@ -352,32 +342,34 @@ int GeoCache::EIO_GetAfter(eio_req *req) {
   ev_unref(EV_DEFAULT_UC);
   cache_request *cache_req = (cache_request *)req->data;
   GeoCache *gc = cache_req->cache;
+  geocache_context *ctx = cache_req->ctx;
+  geocache_http_response *response = cache_req->response;
 
   Handle<Value> argv[2];
 
-  if (!cache_req->data) {       // this should be a malloc error set earlier in EIO_Get
+  if (!cache_req->response) {
     argv[0] = Exception::Error(String::New("No response was received from the cache"));
     argv[1] = Undefined();
   } else {
     // convert the http_response to a javascript object
     Local<Object> result = Object::New();
-    result->Set(code_symbol, Integer::New(cache_req->code)); // the HTTP response code
+    result->Set(code_symbol, Integer::New(response->code)); // the HTTP response code
 
     // set the mtime to as a javascript date
-    if (cache_req->mtime) {
-      result->Set(mtime_symbol, Date::New(apr_time_as_msec(cache_req->mtime)));
+    if (response->mtime) {
+      result->Set(mtime_symbol, Date::New(apr_time_as_msec(response->mtime)));
     }
 
     // set the response data as a Node Buffer object
-    if (cache_req->data) {
-      result->Set(data_symbol, Buffer::New(cache_req->data, cache_req->data_len)->handle_);
+    if (response->data) {
+      result->Set(data_symbol, Buffer::New((char *)response->data->buf, response->data->size)->handle_);
     }
 
     // Set the response headers as a javascript object with header
     // names as keys and header values as an array. Header values are
     // in an array as more than one header of the same name can be
     // set.
-    /*if (response->headers && !apr_is_empty_table(response->headers)) {
+    if (response->headers && !apr_is_empty_table(response->headers)) {
       Local<Object> headers = Object::New();
       const apr_array_header_t *elts = apr_table_elts(response->headers);
       int i;
@@ -398,7 +390,7 @@ int GeoCache::EIO_GetAfter(eio_req *req) {
         }
       }
       result->Set(headers_symbol, headers);
-      }*/
+    }
 
     argv[0] = Undefined();
     argv[1] = result;
@@ -414,12 +406,10 @@ int GeoCache::EIO_GetAfter(eio_req *req) {
   // clean up
   cache_req->cb.Dispose();
 
-  gc->Unref();
+  gc->Unref(); // decrement the cache reference so it can be garbage collected
 
-  free(cache_req->queryString);
-  free(cache_req->pathInfo);
-  free(cache_req->baseUrl);
-  free(cache_req);
+  ctx->clear_errors(ctx);
+  apr_pool_destroy(ctx->pool);  // free all memory for this request
 
   return 0;
 }
