@@ -175,26 +175,26 @@ public:
     return ctx;
   }
 
-  static Persistent<FunctionTemplate> s_ct;
+  static Persistent<FunctionTemplate> constructor_template;
   static void Init(Handle<Object> target)
   {
     HandleScope scope;
 
     Local<FunctionTemplate> t = FunctionTemplate::New(New);
 
-    s_ct = Persistent<FunctionTemplate>::New(t);
-    s_ct->InstanceTemplate()->SetInternalFieldCount(1);
-    s_ct->SetClassName(String::NewSymbol("GeoCache"));
+    constructor_template = Persistent<FunctionTemplate>::New(t);
+    constructor_template->InstanceTemplate()->SetInternalFieldCount(1);
+    constructor_template->SetClassName(String::NewSymbol("GeoCache"));
 
     code_symbol = NODE_PSYMBOL("code");
     data_symbol = NODE_PSYMBOL("data");
     mtime_symbol = NODE_PSYMBOL("mtime");
     headers_symbol = NODE_PSYMBOL("headers");
     
-    NODE_SET_PROTOTYPE_METHOD(s_ct, "get", GetAsync);
-    NODE_SET_METHOD(s_ct, "FromConfigFile", FromConfigFileAsync);
+    NODE_SET_PROTOTYPE_METHOD(constructor_template, "get", GetAsync);
+    NODE_SET_METHOD(constructor_template, "FromConfigFile", FromConfigFileAsync);
 
-    target->Set(String::NewSymbol("GeoCache"), s_ct->GetFunction());
+    target->Set(String::NewSymbol("GeoCache"), constructor_template->GetFunction());
   }
 
   GeoCache(config_context *config) :
@@ -532,7 +532,7 @@ int GeoCache::EIO_FromConfigFileAfter(eio_req *req) {
     apr_pool_destroy(config_req->pool);
   } else {
     Local<Value> arg  = External::New(config_req->config);
-    Persistent<Object> cache(GeoCache::s_ct->GetFunction()->NewInstance(1, &arg));
+    Persistent<Object> cache(GeoCache::constructor_template->GetFunction()->NewInstance(1, &arg));
 
     argv[0] = Undefined();
     argv[1] = scope.Close(cache);
@@ -552,7 +552,7 @@ int GeoCache::EIO_FromConfigFileAfter(eio_req *req) {
 }
 
 
-Persistent<FunctionTemplate> GeoCache::s_ct;
+Persistent<FunctionTemplate> GeoCache::constructor_template;
 
 extern "C" {
   static void init (Handle<Object> target)
