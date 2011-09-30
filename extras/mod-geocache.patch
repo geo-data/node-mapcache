@@ -1,0 +1,189 @@
+Index: include/geocache.h
+===================================================================
+--- include/geocache.h	(revision 434)
++++ include/geocache.h	(working copy)
+@@ -22,6 +22,10 @@
+ #ifndef GEOCACHE_H_
+ #define GEOCACHE_H_
+ 
++#ifdef __cplusplus
++extern "C" {
++#endif 
++
+ #include <apr_tables.h>
+ #include <apr_hash.h>
+ #include <apr_global_mutex.h>
+@@ -1531,6 +1535,10 @@
+ 
+ int geocache_is_axis_inverted(const char *srs);
+ 
++#ifdef __cplusplus
++}
++#endif
++  
+ #endif /* GEOCACHE_H_ */
+ /* vim: ai ts=3 sts=3 et sw=3
+ */
+Index: geocache-config.in
+===================================================================
+--- geocache-config.in	(revision 0)
++++ geocache-config.in	(revision 0)
+@@ -0,0 +1,45 @@
++
++# This script is based on mapserver-config
++usage()
++{
++	cat <<EOF
++Usage: geocache-config [OPTIONS]
++Options:
++	[--libs]
++	[--cflags]
++	[--includes]
++	[--version]
++EOF
++	exit $1
++}
++
++if test $# -eq 0; then
++	usage 1 1>&2
++fi
++
++while test $# -gt 0; do
++    case $1 in 
++        --libs)
++            echo $CONFIG_LIBS
++            ;;
++
++        --includes)
++            echo $CONFIG_INCLUDES
++            ;;
++
++        --cflags)
++            echo $CONFIG_CFLAGS
++            ;;
++
++        --version)
++            echo $CONFIG_VERSION
++            ;;
++
++        *)
++            usage 1 1>&2
++            exit 1
++            ;;
++
++    esac
++    shift
++done
+
+Property changes on: geocache-config.in
+___________________________________________________________________
+Added: svn:executable
+   + *
+
+Index: src/Makefile
+===================================================================
+--- src/Makefile	(revision 434)
++++ src/Makefile	(working copy)
+@@ -7,24 +7,30 @@
+ 
+ install-fcgi: geocache.fcgi fcgihelp
+ 
++install-lib: libgeocache.a
++	mkdir -p $(libdir)
++	install -m 644 -t $(libdir) ./libgeocache.a
++
+ fcgihelp:
+ 	echo "fcgi help"
+ 
+ .c.o:
+ 	$(LIBTOOL) --tag CC --mode=compile $(CC) $(CFLAGS) $(INCLUDES) -c $<
+-	
++
+ mod_geocache.la: mod_geocache.o
+ 
+ mod_geocache.o:  mod_geocache.c $(OBJS)
+ 	$(APXS) "-Wc,$(CFLAGS) $(INCLUDES)" "-Wl,$(LIBS)" -c mod_geocache.c $(LOBJS)
+-	
+-geocache.fcgi: fastcgi_geocache.c $(OBJS)
+-	$(LIBTOOL) --mode=link --tag CC $(CC) -o geocache.fcgi $(CFLAGS) $(INCLUDES) $(FCGI_INC) fastcgi_geocache.c $(LOBJS) $(LIBS) $(FCGI_LIB)
+ 
+-geocache_seed: geocache_seed.c $(OBJS)
+-	$(LIBTOOL) --mode=link --tag CC $(CC) -o geocache_seed $(CFLAGS) $(INCLUDES) geocache_seed.c $(LOBJS) $(LIBS) $(SEEDER_EXTRALIBS)
++geocache.fcgi: fastcgi_geocache.c libgeocache.a
++	$(LIBTOOL) --mode=link --tag CC $(CC) -o geocache.fcgi $(CFLAGS) $(INCLUDES) $(FCGI_INC) fastcgi_geocache.c libgeocache.a $(LIBS) $(FCGI_LIB)
+ 
++geocache_seed: geocache_seed.c libgeocache.a
++	$(LIBTOOL) --mode=link --tag CC $(CC) -o geocache_seed $(CFLAGS) $(INCLUDES) geocache_seed.c libgeocache.a $(LIBS) $(SEEDER_EXTRALIBS)
+ 
++libgeocache.a: $(OBJS)
++	$(LIBTOOL) --mode=link --tag CC $(CC) -o libgeocache.a $(CFLAGS) $(INCLUDES) $(LOBJS) $(LIBS)
++
+ clean:
+ 	rm -f *.o
+ 	rm -f *.so
+@@ -33,5 +39,7 @@
+ 	rm -rf .libs
+ 	rm -f *.la
+ 	rm -f *.sla
++	rm -f libgeocache.a
+ 	rm -f geocache.fcgi
++	rm -f geocache_seed
+ 
+Index: Makefile.inc.in
+===================================================================
+--- Makefile.inc.in	(revision 434)
++++ Makefile.inc.in	(working copy)
+@@ -1,4 +1,8 @@
+-TARGETS=@TARGETS@ geocache_seed
++libdir=@prefix@@libdir@
++includedir=@prefix@@includedir@
++bindir=@prefix@@bindir@
++
++TARGETS=@TARGETS@ geocache_seed libgeocache.a
+ APXS=@APXS@
+ HTTPD=@HTTPD@
+ CC=@CC@
+Index: Makefile
+===================================================================
+--- Makefile	(revision 434)
++++ Makefile	(working copy)
+@@ -2,15 +2,22 @@
+ 
+ all: .header
+ 	cd src; $(MAKE) $(MFLAGS)
+-	
++
+ install-module: .header
+ 	cd src; $(MAKE) $(MFLAGS) install-module
+ 
++install-lib: .header geocache-config
++	mkdir -p $(includedir)
++	mkdir -p $(bindir)
++	install -m 644 -t $(includedir) ./include/geocache.h
++	install -m 755 -t $(bindir) ./geocache-config
++	cd src; $(MAKE) $(MFLAGS) install-lib
++
+ # make clean and rerun if essential files have been modified
+-.header: configure include/geocache.h include/util.h include/errors.h Makefile Makefile.inc src/Makefile
++.header: configure include/geocache.h include/util.h include/errors.h Makefile Makefile.inc src/Makefile geocache-config.in
+ 	$(MAKE) clean
+ 	@touch .header
+-	
++
+ clean:
+ 	cd src; $(MAKE) clean
+ 
+@@ -22,3 +29,13 @@
+ 
+ apache-restart:
+ 	$(APACHECTL) restart
++
++geocache-config: .header
++	rm -f geocache-config
++	echo '#!/bin/sh' > geocache-config
++	echo 'CONFIG_LIBS="-lgeocache -L$(libdir) $(LIBS)"' >> geocache-config
++	echo 'CONFIG_CFLAGS="$(CFLAGS)"' >> geocache-config
++	echo 'CONFIG_INCLUDES="-I$(includedir) $(INCLUDES)"' >> geocache-config
++	echo 'CONFIG_VERSION="'`grep '#define GEOCACHE_VERSION ' ./include/geocache.h | sed 's/\"//g' | sed 's/#define GEOCACHE_VERSION //'`'"' >> geocache-config
++	cat geocache-config.in >> geocache-config
++	chmod a+x geocache-config

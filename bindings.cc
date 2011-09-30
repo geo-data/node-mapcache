@@ -7,9 +7,7 @@
 #include <node.h>
 #include <node_buffer.h>
 
-extern "C" {
 #include "geocache.h"
-}
 #include <apr_strings.h>
 #include <apr_pools.h>
 #include <apr_file_io.h>
