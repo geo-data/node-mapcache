@@ -12,7 +12,7 @@ var http = require('http');
 var path = require('path');
 
 var conffile = path.resolve('./geocache.xml');
-var service = new geocache.GeoCache(conffile);
+var service = geocache.GeoCache.FromConfigFile(conffile);
 
 http.createServer(function (req, res) {
     var baseUrl = "http://localhost:3000";

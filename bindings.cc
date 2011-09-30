@@ -19,10 +19,11 @@ using namespace v8;
 #include <iostream>
 using namespace std;
 
-#define REQ_STR_ARG(I, VAR)                                             \
-  if (args.Length() <= (I) || !args[I]->IsString())                     \
-    return ThrowException(Exception::TypeError(                         \
-      String::New("Argument " #I " must be a string")));                \
+// These defines are adapted from node-mapserver
+#define REQ_STR_ARG(I, VAR)                              \
+  if (args.Length() <= (I) || !args[I]->IsString())      \
+    return ThrowException(Exception::TypeError(          \
+      String::New("Argument " #I " must be a string"))); \
   String::Utf8Value VAR(args[I]->ToString());
 
 #define REQ_FUN_ARG(I, VAR)                                \
@@ -31,8 +32,14 @@ using namespace std;
       String::New("Argument " #I " must be a function"))); \
   Local<Function> VAR = Local<Function>::Cast(args[I]);
 
-#define THROW_CSTR_ERROR(TYPE, STR)                             \
-return ThrowException(Exception::TYPE(String::New(STR)));
+#define REQ_EXT_ARG(I, VAR)                             \
+  if (args.Length() <= (I) || !args[I]->IsExternal())   \
+    return ThrowException(Exception::TypeError(         \
+      String::New("Argument " #I " invalid")));         \
+  Local<External> VAR = Local<External>::Cast(args[I]);
+
+#define THROW_CSTR_ERROR(TYPE, STR)                         \
+  return ThrowException(Exception::TYPE(String::New(STR)));
 
 typedef struct geocache_context_fcgi geocache_context_fcgi;
 typedef struct geocache_context_fcgi_request geocache_context_fcgi_request;
@@ -115,10 +122,11 @@ class GeoCache;                 // forward declaration for this structure
 struct cache_request {
   Persistent<Function> cb;
   GeoCache *cache;
-  geocache_context* ctx;
+  apr_pool_t* pool;
   char *baseUrl;
   char *pathInfo;
   char *queryString;
+  char *err;
   geocache_http_response *response;
 };
 
@@ -132,13 +140,28 @@ static Persistent<String> headers_symbol;
 class GeoCache: ObjectWrap
 {
 private:
-  geocache_context_fcgi* globalctx;
-  geocache_context* ctx;
-  geocache_cfg *cfg;
+  // a combination of a geocache_cfg and memory pool
+  struct config_context {
+    geocache_cfg *cfg;
+    apr_pool_t *pool;
+  };
+
+  config_context *config;
 
   static int EIO_Get(eio_req *req);
   static int EIO_GetAfter(eio_req *req);
 public:
+
+  static config_context* config_context_create(apr_pool_t *pool) {
+    config_context *ctx = (config_context *) apr_pcalloc(pool, sizeof(config_context));
+    if (!ctx) {
+      return NULL;
+    }
+    ctx->pool = pool;
+    ctx->cfg = NULL;
+
+    return ctx;
+  }
 
   static Persistent<FunctionTemplate> s_ct;
   static void Init(Handle<Object> target)
@@ -157,65 +180,94 @@ public:
     headers_symbol = NODE_PSYMBOL("headers");
     
     NODE_SET_PROTOTYPE_METHOD(s_ct, "get", GetAsync);
+    NODE_SET_METHOD(s_ct, "FromConfigFile", FromConfigFile);
 
     target->Set(String::NewSymbol("GeoCache"), s_ct->GetFunction());
   }
 
-  GeoCache() :
-    globalctx(fcgi_context_create(global_pool)),
-    ctx(NULL),
-    cfg(NULL)
+  GeoCache(config_context *config) :
+    config(config)
   {
-    if (globalctx) {       // should throw an error here if !globalctx
-      ctx = (geocache_context*) globalctx;
-      cfg = geocache_configuration_create(ctx->pool);
-      ctx->config = cfg;
-    }
+    // should throw an error here if !config
     cout << "Instantiating" << endl;
   }
 
   ~GeoCache()
   {
     cout << "Destroying" << endl;
-    apr_pool_destroy(ctx->pool);
-    ctx->clear_errors(ctx);
+    apr_pool_destroy(config->pool);
+    config = NULL;
   }
 
-  static Handle<Value> New(const Arguments& args)
+  static Handle<Value> New(const Arguments& args) {
+    HandleScope scope;
+    if (!args.IsConstructCall()) {
+      THROW_CSTR_ERROR(Error, "GeoCache() is expected to be called as a constructor with the `new` keyword");
+    }
+    REQ_EXT_ARG(0, config);
+    (new GeoCache((config_context *)config->Value()))->Wrap(args.This());
+    return args.This();
+  }
+
+  // Factory method to create a cache from a configuration file
+  static Handle<Value> FromConfigFile(const Arguments& args)
   {
     HandleScope scope;
-    const char *usage = "usage: new GeoCache(configfile)";
+    const char *usage = "usage: GeoCache.FromConfigFile(configfile)";
     if (args.Length() != 1) {
       THROW_CSTR_ERROR(Error, usage);
     }
     REQ_STR_ARG(0, conffile);
 
-    // create the pool if it does not already exist
+    // create the global pool if it does not already exist
     if(global_pool == NULL && apr_pool_create(&global_pool, NULL) != APR_SUCCESS) {
-      THROW_CSTR_ERROR(Error, "Could not create the geocache context pool");
+      THROW_CSTR_ERROR(Error, "Could not create the global cache memory pool");
     }
 
-    // instantiate our object
-    GeoCache* gc = new GeoCache();
-    gc->ctx->log(gc->ctx, GEOCACHE_DEBUG, (char *)"geocache node conf file: %s", *conffile);
+    // create the pool for this configuration context
+    apr_pool_t *config_pool = NULL;
+    if (apr_pool_create(&config_pool, global_pool) != APR_SUCCESS) {
+      THROW_CSTR_ERROR(Error, "Could not create the cache configuration memory pool");
+    }
+
+    // create the configuration context
+    config_context *config = NULL;
+    config = config_context_create(config_pool);
+    if (!config) {
+      apr_pool_destroy(config_pool);
+      THROW_CSTR_ERROR(Error, "Could not create the cache configuration context");
+    }
+    config->cfg = geocache_configuration_create(config->pool);
+
+    // create the context for loading the configuration
+    geocache_context *ctx = (geocache_context*) fcgi_context_create(config->pool);
+    if (!ctx) {
+      apr_pool_destroy(config_pool);
+      THROW_CSTR_ERROR(Error, "Could not create the context for loading the configuration file");
+    }
+
+    ctx->log(ctx, GEOCACHE_DEBUG, (char *)"geocache node conf file: %s", *conffile);
 
     // parse the configuration file
-    geocache_configuration_parse(gc->ctx, *conffile, gc->cfg, 1);
-    if(GC_HAS_ERROR(gc->ctx)) {
-      gc->ctx->log(gc->ctx, (geocache_log_level) 500, (char *)"failed to parse %s: %s", *conffile, gc->ctx->get_error_message(gc->ctx));
+    geocache_configuration_parse(ctx, *conffile, config->cfg, 1);
+    if(GC_HAS_ERROR(ctx)) {
+      ctx->log(ctx, (geocache_log_level) 500, (char *)"failed to parse %s: %s", *conffile, ctx->get_error_message(ctx));
+      apr_pool_destroy(config_pool);
       THROW_CSTR_ERROR(Error, "failed to parse configuration file"); // TODO: this should include the file name and error message
     }
 
     // setup the context from the configuration
-    geocache_configuration_post_config(gc->ctx, gc->cfg);
-    if(GC_HAS_ERROR(gc->ctx)) {
-      gc->ctx->log(gc->ctx, (geocache_log_level) 500, (char *)"post-config failed for %s: %s", *conffile, gc->ctx->get_error_message(gc->ctx));
+    geocache_configuration_post_config(ctx, config->cfg);
+    if(GC_HAS_ERROR(ctx)) {
+      ctx->log(ctx, (geocache_log_level) 500, (char *)"post-config failed for %s: %s", *conffile, ctx->get_error_message(ctx));
+      apr_pool_destroy(config_pool);
       THROW_CSTR_ERROR(Error, "post-config failed"); // TODO: this should include the file name and error message
     }
 
-    // wrap and return the geocache object
-    gc->Wrap(args.This());
-    return args.This();
+    // return the cache object to javascript land
+    Local<Value> arg  = External::New(config);
+    Persistent<Object> cache(GeoCache::s_ct->GetFunction()->NewInstance(1, &arg));
+    return scope.Close(cache);
   }
 
   static Handle<Value> GetAsync(const Arguments& args)
@@ -234,7 +286,7 @@ public:
     
     // create the pool for this request
     apr_pool_t *req_pool = NULL;
-    if (apr_pool_create(&req_pool, global_pool) != APR_SUCCESS) {
+    if (apr_pool_create(&req_pool, cache->config->pool) != APR_SUCCESS) {
       THROW_CSTR_ERROR(Error, "Could not create the geocache request memory pool");
     }
 
@@ -244,14 +296,7 @@ public:
       THROW_CSTR_ERROR(Error, "malloc in GeoCache::GetAsync failed.");
     }
 
-    geocache_context_fcgi* req_ctx = fcgi_context_create(req_pool);
-    if (!req_ctx) {
-      apr_pool_destroy(req_pool);
-      THROW_CSTR_ERROR(Error, "Could not create the request context.");
-    }
-
-    cache_req->ctx = (geocache_context *) req_ctx;
-    cache_req->ctx->config = cache->ctx->config;
+    cache_req->pool = req_pool;
     cache_req->cache = cache;
     cache_req->cb = Persistent<Function>::New(cb);
 
@@ -287,11 +332,19 @@ public:
 // the Node/V8 world here.
 int GeoCache::EIO_Get(eio_req *req) {
   cache_request *cache_req = (cache_request *)req->data;
-  geocache_context *ctx = cache_req->ctx;
+  geocache_context *ctx;
 
   apr_table_t *params;
   geocache_request *request = NULL;
   geocache_http_response *http_response = NULL;
+
+  // set up the local context
+  ctx = (geocache_context *)fcgi_context_create(cache_req->pool);
+  if (!ctx) {
+    cache_req->err = (char *)"Could not create the request context";
+    return 0;
+  }
+  ctx->config = cache_req->cache->config->cfg;
 
   // parse the query string and dispatch the request
   params = geocache_http_parse_param_string(ctx, cache_req->queryString);
@@ -341,6 +394,12 @@ int GeoCache::EIO_Get(eio_req *req) {
     http_response = geocache_core_respond_to_error(ctx, request->service);
   }
 
+  if (!http_response) {
+    cache_req->err = (char *)"No response was received from the cache";
+  }
+
+  ctx->clear_errors(ctx);
+  
   cache_req->response = http_response;
 
   return 0;
@@ -352,13 +411,12 @@ int GeoCache::EIO_GetAfter(eio_req *req) {
   ev_unref(EV_DEFAULT_UC);
   cache_request *cache_req = (cache_request *)req->data;
   GeoCache *gc = cache_req->cache;
-  geocache_context *ctx = cache_req->ctx;
   geocache_http_response *response = cache_req->response;
 
   Handle<Value> argv[2];
 
-  if (!cache_req->response) {
-    argv[0] = Exception::Error(String::New("No response was received from the cache"));
+  if (cache_req->err) {
+    argv[0] = Exception::Error(String::New(cache_req->err));
     argv[1] = Undefined();
   } else {
     // convert the http_response to a javascript object
@@ -418,8 +476,7 @@ int GeoCache::EIO_GetAfter(eio_req *req) {
 
   gc->Unref(); // decrement the cache reference so it can be garbage collected
 
-  ctx->clear_errors(ctx);
-  apr_pool_destroy(ctx->pool);  // free all memory for this request
+  apr_pool_destroy(cache_req->pool); // free all memory for this request
 
   return 0;
 }

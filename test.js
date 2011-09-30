@@ -3,7 +3,7 @@ var geocache = require('./build/default/bindings.node');
 console.log('geocache loaded');
 
 var conffile = path.resolve('./geocache.xml');
-var service = new geocache.GeoCache(conffile);
+var service = geocache.GeoCache.FromConfigFile(conffile);
 
 console.log('service created from ' + conffile);
 
