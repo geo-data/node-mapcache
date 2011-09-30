@@ -58,7 +58,7 @@ void geocache_fcgi_mutex_aquire(geocache_context *gctx) {
   int ret;
 #ifdef DEBUG
   if(ctx->mutex_file != NULL) {
-    gctx->set_error(gctx, 500, "SEVERE: fcgi recursive mutex acquire");
+    gctx->set_error(gctx, 500, (char *)"SEVERE: fcgi recursive mutex acquire");
     return; /* BUG ! */
   }
 #endif
@@ -300,23 +300,35 @@ int GeoCache::EIO_Get(eio_req *req) {
   if (GC_HAS_ERROR(ctx) || !request) {
     http_response = geocache_core_respond_to_error(ctx, (request) ? request->service : NULL);
   } else {
-    if (request->type == GEOCACHE_REQUEST_GET_CAPABILITIES) {
+    switch (request->type) {
+    case GEOCACHE_REQUEST_GET_CAPABILITIES: {
       geocache_request_get_capabilities *req = (geocache_request_get_capabilities*)request;
       http_response = geocache_core_get_capabilities(ctx, request->service, req, cache_req->baseUrl, cache_req->pathInfo, ctx->config);
-    } else if ( request->type == GEOCACHE_REQUEST_GET_TILE) {
+      break;
+    }
+    case GEOCACHE_REQUEST_GET_TILE: {
       geocache_request_get_tile *req_tile = (geocache_request_get_tile*)request;
       http_response = geocache_core_get_tile(ctx, req_tile);
-    } else if ( request->type == GEOCACHE_REQUEST_PROXY ) {
+      break;
+    }
+    case GEOCACHE_REQUEST_PROXY: {
       geocache_request_proxy *req_proxy = (geocache_request_proxy*)request;
       http_response = geocache_core_proxy_request(ctx, req_proxy);
-    } else if ( request->type == GEOCACHE_REQUEST_GET_MAP) {
+      break;
+    }
+    case GEOCACHE_REQUEST_GET_MAP: {
       geocache_request_get_map *req_map = (geocache_request_get_map*)request;
       http_response = geocache_core_get_map(ctx, req_map);
-    } else if ( request->type == GEOCACHE_REQUEST_GET_FEATUREINFO) {
+      break;
+    }
+    case GEOCACHE_REQUEST_GET_FEATUREINFO: {
       geocache_request_get_feature_info *req_fi = (geocache_request_get_feature_info*)request;
       http_response = geocache_core_get_featureinfo(ctx, req_fi);
-    } else {
+      break;
+    }
+    default:
       ctx->set_error(ctx, 500, (char*)"###BUG### unknown request type");
+      break;
     }
 
     if (GC_HAS_ERROR(ctx)) {
