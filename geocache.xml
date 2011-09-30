@@ -63,10 +63,21 @@
       </http>
    </source>
 
+   <grid name="BNG">
+      <metadata>
+         <title>British National Grid</title>
+      </metadata>
+      <extent>0 0 700000 1300000</extent>
+      <srs>EPSG:27700</srs>
+      <resolutions>0.5263551401977046 1.0527102803954091 2.1054205607908183 4.210841121581637 8.421682243163273 12.632523364744909 16.843364486326546 21.054205607908184</resolutions>
+      <units>m</units>
+      <size>256 256</size>
+   </grid>
+
    <tileset name="aerial-photos">
       <source>cco</source>
       <cache>disk</cache>
-      <grid>WGS84</grid>
+      <grid>BNG</grid>
       <format>JPEG</format>
    </tileset>
    <service type="wms" enabled="true">
