@@ -11,33 +11,59 @@ var geocache = require('./build/default/bindings.node');
 var http = require('http');
 var path = require('path');
 
-var conffile = path.resolve('./geocache.xml');
-var service = geocache.GeoCache.FromConfigFile(conffile);
+// Build a callback to handle Cache responses
+function getCacheResponseHandler(httpRequest, httpResponse) {
 
-http.createServer(function (req, res) {
-    var baseUrl = "http://localhost:3000";
-    var urlParts = url.parse(req.url);
-    var params = urlParts.query || '';
-    var pathInfo = urlParts.pathname || "/";
-    
-    service.get(baseUrl, pathInfo, params, function (err, response) {
+    // Handle a response from the cache
+    function handleCacheResponse(err, cacheResponse) {
         if (err) {
-            res.writeHead(500);
-            res.end(err.stack);
+            httpResponse.writeHead(500);
+            httpResponse.end(err.stack);
             console.error(err.stack);
             return;
         }
 
         var header, i, headers = {};
-        for (header in response.headers) {
-            if (response.headers.hasOwnProperty(header)) {
-                values = response.headers[header];
+        for (header in cacheResponse.headers) {
+            if (cacheResponse.headers.hasOwnProperty(header)) {
+                values = cacheResponse.headers[header];
                 headers[header] = values[0]; // get the first header value
             }
         }
-        res.writeHead(response.code, headers);
-        res.end(response.data);
-        console.log('Serving ' + req.url);
-    });    
-}).listen(3000, "localhost");
-console.log('Server running at http://localhost:3000/');
+        httpResponse.writeHead(cacheResponse.code, headers);
+        httpResponse.end(cacheResponse.data);
+        console.log('Serving ' + httpRequest.url);
+    }
+
+    return handleCacheResponse;
+}
+// Build a callback to handle HTTP cache requests
+function getCacheRequestHandler(cache) {
+
+    // Callback called to handle HTTP requests
+    function handleRequest(req, res) {
+        var baseUrl = "http://localhost:3000";
+        var urlParts = url.parse(req.url);
+        var params = urlParts.query || '';
+        var pathInfo = urlParts.pathname || "/";
+        
+        cache.get(baseUrl, pathInfo, params, getCacheResponseHandler(req, res));
+    }
+
+    return handleRequest;
+}
+
+// Callback that receives a cache after it is loaded and uses it to
+// create a HTTP request handler
+function handleCache(err, cache) {
+    if (err) {
+        throw err;
+    }
+
+    http.createServer(getCacheRequestHandler(cache)).listen(3000, "localhost");
+    console.log('Server running at http://localhost:3000/');
+}
+
+// load the cache from the configuration file and handle the resulting object
+var conffile = path.resolve('./geocache.xml');
+geocache.GeoCache.FromConfigFile(conffile, handleCache);

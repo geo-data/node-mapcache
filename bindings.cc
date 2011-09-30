@@ -116,8 +116,8 @@ static geocache_context_fcgi* fcgi_context_create(apr_pool_t *pool) {
   return ctx;
 }
 
-/* The structure used for passing geocache data asynchronously between
-   threads using libeio */
+/* The structure used for passing cache request data asynchronously
+   between threads using libeio */
 class GeoCache;                 // forward declaration for this structure
 struct cache_request {
   Persistent<Function> cb;
@@ -146,14 +146,26 @@ private:
     apr_pool_t *pool;
   };
 
+  /* The structure used for passing config file loading data
+     asynchronously between threads using libeio */
+  struct config_request {
+    Persistent<Function> cb;
+    apr_pool_t *pool;
+    config_context *config;
+    char *conffile;
+    char *err;
+  };
+
   config_context *config;
 
   static int EIO_Get(eio_req *req);
   static int EIO_GetAfter(eio_req *req);
+  static int EIO_FromConfigFile(eio_req *req);
+  static int EIO_FromConfigFileAfter(eio_req *req);
 public:
 
   static config_context* config_context_create(apr_pool_t *pool) {
-    config_context *ctx = (config_context *) apr_pcalloc(pool, sizeof(config_context));
+    config_context *ctx = (config_context *) apr_pcalloc(pool, sizeof(config_context *));
     if (!ctx) {
       return NULL;
     }
@@ -180,7 +192,7 @@ public:
     headers_symbol = NODE_PSYMBOL("headers");
     
     NODE_SET_PROTOTYPE_METHOD(s_ct, "get", GetAsync);
-    NODE_SET_METHOD(s_ct, "FromConfigFile", FromConfigFile);
+    NODE_SET_METHOD(s_ct, "FromConfigFile", FromConfigFileAsync);
 
     target->Set(String::NewSymbol("GeoCache"), s_ct->GetFunction());
   }
@@ -210,14 +222,15 @@ public:
   }
 
   // Factory method to create a cache from a configuration file
-  static Handle<Value> FromConfigFile(const Arguments& args)
+  static Handle<Value> FromConfigFileAsync(const Arguments& args)
   {
     HandleScope scope;
     const char *usage = "usage: GeoCache.FromConfigFile(configfile)";
-    if (args.Length() != 1) {
+    if (args.Length() != 2) {
       THROW_CSTR_ERROR(Error, usage);
     }
     REQ_STR_ARG(0, conffile);
+    REQ_FUN_ARG(1, cb);
 
     // create the global pool if it does not already exist
     if(global_pool == NULL && apr_pool_create(&global_pool, NULL) != APR_SUCCESS) {
@@ -230,44 +243,25 @@ public:
       THROW_CSTR_ERROR(Error, "Could not create the cache configuration memory pool");
     }
 
-    // create the configuration context
-    config_context *config = NULL;
-    config = config_context_create(config_pool);
-    if (!config) {
+    config_request *config_req = (config_request *)apr_pcalloc(config_pool, sizeof(struct config_request));
+    if (!config_req) {
       apr_pool_destroy(config_pool);
-      THROW_CSTR_ERROR(Error, "Could not create the cache configuration context");
-    }
-    config->cfg = geocache_configuration_create(config->pool);
-
-    // create the context for loading the configuration
-    geocache_context *ctx = (geocache_context*) fcgi_context_create(config->pool);
-    if (!ctx) {
-      apr_pool_destroy(config_pool);
-      THROW_CSTR_ERROR(Error, "Could not create the context for loading the configuration file");
+      THROW_CSTR_ERROR(Error, "malloc in GeoCache::FromConfigFileAsync failed");
     }
 
-    ctx->log(ctx, GEOCACHE_DEBUG, (char *)"geocache node conf file: %s", *conffile);
+    config_req->pool = config_pool;
+    config_req->config = NULL;
+    config_req->cb = Persistent<Function>::New(cb);
 
-    // parse the configuration file
-    geocache_configuration_parse(ctx, *conffile, config->cfg, 1);
-    if(GC_HAS_ERROR(ctx)) {
-      ctx->log(ctx, (geocache_log_level) 500, (char *)"failed to parse %s: %s", *conffile, ctx->get_error_message(ctx));
+    config_req->conffile = apr_pstrdup(config_pool, *conffile);
+    if (!config_req->conffile) {
       apr_pool_destroy(config_pool);
-      THROW_CSTR_ERROR(Error, "failed to parse configuration file"); // TODO: this should include the file name and error message
+      THROW_CSTR_ERROR(Error, "malloc in GeoCache::FromConfigFileAsync failed");
     }
-
-    // setup the context from the configuration
-    geocache_configuration_post_config(ctx, config->cfg);
-    if(GC_HAS_ERROR(ctx)) {
-      ctx->log(ctx, (geocache_log_level) 500, (char *)"post-config failed for %s: %s", *conffile, ctx->get_error_message(ctx));
-      apr_pool_destroy(config_pool);
-      THROW_CSTR_ERROR(Error, "post-config failed"); // TODO: this should include the file name and error message
-    }
-
-    // return the cache object to javascript land
-    Local<Value> arg  = External::New(config);
-    Persistent<Object> cache(GeoCache::s_ct->GetFunction()->NewInstance(1, &arg));
-    return scope.Close(cache);
+    
+    eio_custom(EIO_FromConfigFile, EIO_PRI_DEFAULT, EIO_FromConfigFileAfter, config_req);
+    ev_ref(EV_DEFAULT_UC);
+    return Undefined();
   }
 
   static Handle<Value> GetAsync(const Arguments& args)
@@ -293,7 +287,7 @@ public:
     cache_request *cache_req = (cache_request *)apr_pcalloc(req_pool, sizeof(struct cache_request));
     if (!cache_req) {
       apr_pool_destroy(req_pool);
-      THROW_CSTR_ERROR(Error, "malloc in GeoCache::GetAsync failed.");
+      THROW_CSTR_ERROR(Error, "malloc in GeoCache::GetAsync failed");
     }
 
     cache_req->pool = req_pool;
@@ -303,19 +297,19 @@ public:
     cache_req->baseUrl = apr_pstrdup(req_pool, *baseUrl);
     if (!cache_req->baseUrl) {
       apr_pool_destroy(req_pool);
-      THROW_CSTR_ERROR(Error, "malloc in GeoCache::GetAsync failed.");
+      THROW_CSTR_ERROR(Error, "malloc in GeoCache::GetAsync failed");
     }
     
     cache_req->pathInfo = apr_pstrdup(req_pool, *pathInfo);
     if (!cache_req->pathInfo) {
       apr_pool_destroy(req_pool);
-      THROW_CSTR_ERROR(Error, "malloc in GeoCache::GetAsync failed.");
+      THROW_CSTR_ERROR(Error, "malloc in GeoCache::GetAsync failed");
     }
     
     cache_req->queryString = apr_pstrdup(req_pool, *queryString);
     if (!cache_req->queryString) {
       apr_pool_destroy(req_pool);
-      THROW_CSTR_ERROR(Error, "malloc in GeoCache::GetAsync failed.");
+      THROW_CSTR_ERROR(Error, "malloc in GeoCache::GetAsync failed");
     }
 
     cache->Ref(); // increment reference count so cache is not garbage collected
@@ -481,13 +475,90 @@ int GeoCache::EIO_GetAfter(eio_req *req) {
   return 0;
 }
 
+// This is run in a separate thread: *No* contact should be made with
+// the Node/V8 world here.
+int GeoCache::EIO_FromConfigFile(eio_req *req) {
+  config_request *config_req = (config_request *)req->data;
+
+  // create the configuration context
+  config_context *config = NULL;
+  config = config_context_create(config_req->pool);
+  if (!config) {
+    config_req->err = (char *)"Could not create the cache configuration context";
+    return 0;
+  }
+  config->cfg = geocache_configuration_create(config->pool);
+
+  // create the context for loading the configuration
+  geocache_context *ctx = (geocache_context*) fcgi_context_create(config->pool);
+  if (!ctx) {
+    config_req->err = (char *)"Could not create the context for loading the configuration file";
+    return 0;
+  }
+
+  ctx->log(ctx, GEOCACHE_DEBUG, (char *)"geocache node conf file: %s", config_req->conffile);
+
+  // parse the configuration file
+  geocache_configuration_parse(ctx, config_req->conffile, config->cfg, 1);
+  if(GC_HAS_ERROR(ctx)) {
+    config_req->err = apr_psprintf(config->pool, "failed to parse %s: %s", config_req->conffile, ctx->get_error_message(ctx));
+    ctx->clear_errors(ctx);
+    return 0;
+  }
+
+  // setup the context from the configuration
+  geocache_configuration_post_config(ctx, config->cfg);
+  if(GC_HAS_ERROR(ctx)) {
+    config_req->err = apr_psprintf(config->pool, "post-config failed for %s: %s", config_req->conffile, ctx->get_error_message(ctx));
+    ctx->clear_errors(ctx);
+    return 0;
+  }
+
+  config_req->config = config;
+  return 0;
+}
+
+int GeoCache::EIO_FromConfigFileAfter(eio_req *req) {
+  HandleScope scope;
+
+  ev_unref(EV_DEFAULT_UC);
+  config_request *config_req = (config_request *)req->data;
+
+  Handle<Value> argv[2];
+
+  if (config_req->err) {
+    argv[0] = Exception::Error(String::New(config_req->err));
+    argv[1] = Undefined();
+    apr_pool_destroy(config_req->pool);
+  } else {
+    Local<Value> arg  = External::New(config_req->config);
+    Persistent<Object> cache(GeoCache::s_ct->GetFunction()->NewInstance(1, &arg));
+
+    argv[0] = Undefined();
+    argv[1] = scope.Close(cache);
+  }
+
+  // pass the results to the user specified callback function
+  TryCatch try_catch;
+  config_req->cb->Call(Context::GetCurrent()->Global(), 2, argv);
+  if (try_catch.HasCaught()) {
+    FatalException(try_catch);
+  }
+  
+  // clean up
+  config_req->cb.Dispose();
+  
+  return 0;
+}
+
+
 Persistent<FunctionTemplate> GeoCache::s_ct;
 
 extern "C" {
   static void init (Handle<Object> target)
   {
     cout << "Initialising" << endl;
-    apr_pool_initialize();
+    apr_initialize();
 
     GeoCache::Init(target);
   }
