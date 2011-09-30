@@ -16,8 +16,10 @@
 using namespace node;
 using namespace v8;
 
+#ifdef DEBUG
 #include <iostream>
 using namespace std;
+#endif
 
 // These defines are adapted from node-mapserver
 #define REQ_STR_ARG(I, VAR)                              \
@@ -42,7 +44,6 @@ using namespace std;
   return ThrowException(Exception::TYPE(String::New(STR)));
 
 typedef struct geocache_context_fcgi geocache_context_fcgi;
-typedef struct geocache_context_fcgi_request geocache_context_fcgi_request;
 
 apr_pool_t *global_pool = NULL;
 
@@ -201,12 +202,16 @@ public:
     config(config)
   {
     // should throw an error here if !config
-    cout << "Instantiating" << endl;
+#ifdef DEBUG
+    cout << "Instantiating GeoCache instance" << endl;
+#endif
   }
 
   ~GeoCache()
   {
-    cout << "Destroying" << endl;
+#ifdef DEBUG
+    cout << "Destroying GeoCache instance" << endl;
+#endif
     apr_pool_destroy(config->pool);
     config = NULL;
   }
@@ -338,11 +343,12 @@ int GeoCache::EIO_Get(eio_req *req) {
     cache_req->err = (char *)"Could not create the request context";
     return 0;
   }
+
+  // point the context to our cache configuration
   ctx->config = cache_req->cache->config->cfg;
 
   // parse the query string and dispatch the request
   params = geocache_http_parse_param_string(ctx, cache_req->queryString);
-
   geocache_service_dispatch_request(ctx ,&request, cache_req->pathInfo, params, ctx->config);
   if (GC_HAS_ERROR(ctx) || !request) {
     http_response = geocache_core_respond_to_error(ctx, (request) ? request->service : NULL);
@@ -557,11 +563,13 @@ Persistent<FunctionTemplate> GeoCache::constructor_template;
 extern "C" {
   static void init (Handle<Object> target)
   {
-    cout << "Initialising" << endl;
+#ifdef DEBUG
+    cout << "Initialising GeoCache Module" << endl;
+#endif
     apr_initialize();
 
     GeoCache::Init(target);
   }
 
-  NODE_MODULE(bindings, init);
+  NODE_MODULE(bindings, init)
 }
