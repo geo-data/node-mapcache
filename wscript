@@ -6,9 +6,11 @@ def configure(conf):
   conf.check_tool("node_addon")
   # This will tell the compiler to link our extension with the geocache library.
   conf.check_cfg(path='geocache-config', package='', args='--libs --cflags --includes', uselib_store='LIBGEOCACHE', mandatory=True)
+  conf.check_cxx(lib='geocache', libpath=conf.env['LIBPATH_LIBGEOCACHE'], uselib_store='LIBGEOCACHE')
 
 def build(bld):
   obj = bld.new_task_gen("cxx", "shlib", "node_addon")
+  obj.cxxflags = ["-g", "-D_FILE_OFFSET_BITS=64", "-D_LARGEFILE_SOURCE", "-Wall", "-pedantic"]
   obj.target = "bindings"
   obj.source = "bindings.cc"
   obj.uselib = ['LIBGEOCACHE']
