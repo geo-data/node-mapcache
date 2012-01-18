@@ -1,5 +1,9 @@
 var url = require('url');
-var bindings = require('./build/default/bindings.node');
+// support node 0.4 (deprecated)
+var binding_path = (process.versions.node.split('.', 2).join('.') != '0.4')
+    ? './build/Release/bindings'
+    : './build/default/bindings';
+var bindings = require(binding_path);
 var path = require('path');
 
 // Build a callback to handle Cache responses

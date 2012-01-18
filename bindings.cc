@@ -24,6 +24,16 @@ using namespace v8;
 using namespace std;
 #endif
 
+// support for node v0.4 (deprecated)
+#include <node_version.h>       // for the version defines
+#if (NODE_MAJOR_VERSION == 0 && NODE_MINOR_VERSION <= 4)
+#define RETURN_EIO() return 0;
+#define EIO_RETURN int
+#else
+#define RETURN_EIO() return;
+#define EIO_RETURN void
+#endif
+
 // These defines are adapted from node-mapserver
 #define REQ_STR_ARG(I, VAR)                              \
   if (args.Length() <= (I) || !args[I]->IsString())      \
@@ -125,9 +135,9 @@ private:
 
   config_context *config;
 
-  static int EIO_Get(eio_req *req);
+  static EIO_RETURN EIO_Get(eio_req *req);
   static int EIO_GetAfter(eio_req *req);
-  static int EIO_FromConfigFile(eio_req *req);
+  static EIO_RETURN EIO_FromConfigFile(eio_req *req);
   static int EIO_FromConfigFileAfter(eio_req *req);
 public:
 
@@ -295,7 +305,7 @@ public:
 
 // This is run in a separate thread: *No* contact should be made with
 // the Node/V8 world here.
-int MapCache::EIO_Get(eio_req *req) {
+EIO_RETURN MapCache::EIO_Get(eio_req *req) {
   cache_request *cache_req = (cache_request *)req->data;
   mapcache_context *ctx;
 
@@ -307,7 +317,7 @@ int MapCache::EIO_Get(eio_req *req) {
   ctx = (mapcache_context *)fcgi_context_create(cache_req->pool);
   if (!ctx) {
     cache_req->err = (char *)"Could not create the request context";
-    return 0;
+    RETURN_EIO();
   }
 
   // point the context to our cache configuration
@@ -368,7 +378,7 @@ int MapCache::EIO_Get(eio_req *req) {
   
   cache_req->response = http_response;
 
-  return 0;
+  RETURN_EIO();
 }
 
 int MapCache::EIO_GetAfter(eio_req *req) {
@@ -449,7 +459,7 @@ int MapCache::EIO_GetAfter(eio_req *req) {
 
 // This is run in a separate thread: *No* contact should be made with
 // the Node/V8 world here.
-int MapCache::EIO_FromConfigFile(eio_req *req) {
+EIO_RETURN MapCache::EIO_FromConfigFile(eio_req *req) {
   config_request *config_req = (config_request *)req->data;
 
   // create the configuration context
@@ -457,7 +467,7 @@ int MapCache::EIO_FromConfigFile(eio_req *req) {
   config = config_context_create(config_req->pool);
   if (!config) {
     config_req->err = (char *)"Could not create the cache configuration context";
-    return 0;
+    RETURN_EIO();
   }
   config->cfg = mapcache_configuration_create(config_req->pool);
 
@@ -465,7 +475,7 @@ int MapCache::EIO_FromConfigFile(eio_req *req) {
   mapcache_context *ctx = (mapcache_context*) fcgi_context_create(config_req->pool);
   if (!ctx) {
     config_req->err = (char *)"Could not create the context for loading the configuration file";
-    return 0;
+    RETURN_EIO();
   }
 
   ctx->log(ctx, MAPCACHE_DEBUG, (char *)"mapcache node conf file: %s", config_req->conffile);
@@ -475,7 +485,7 @@ int MapCache::EIO_FromConfigFile(eio_req *req) {
   if(GC_HAS_ERROR(ctx)) {
     config_req->err = apr_psprintf(config_req->pool, "failed to parse %s: %s", config_req->conffile, ctx->get_error_message(ctx));
     ctx->clear_errors(ctx);
-    return 0;
+    RETURN_EIO();
   }
 
   // setup the context from the configuration
@@ -483,11 +493,11 @@ int MapCache::EIO_FromConfigFile(eio_req *req) {
   if(GC_HAS_ERROR(ctx)) {
     config_req->err = apr_psprintf(config_req->pool, "post-config failed for %s: %s", config_req->conffile, ctx->get_error_message(ctx));
     ctx->clear_errors(ctx);
-    return 0;
+    RETURN_EIO();
   }
 
   config_req->config = config;
-  return 0;
+  RETURN_EIO();
 }
 
 int MapCache::EIO_FromConfigFileAfter(eio_req *req) {
