@@ -1,8 +1,8 @@
 var path = require('path');
-var geocache = require('./build/default/bindings.node');
+var mapcache = require('./mapcache');
 
-console.log('geocache loaded');
-var conffile = path.resolve('./geocache.xml');
+console.log('mapcache loaded');
+var conffile = path.resolve('./mapcache.xml');
 
 // Callback that receives a cache response
 function handleCacheResponse(err, response) {
@@ -28,4 +28,4 @@ function handleCache(err, cache) {
     cache.get(base, pathInfo, params, handleCacheResponse); // query the cache
 }
 
-geocache.GeoCache.FromConfigFile(conffile, handleCache); // load the cache from file
+mapcache.MapCache.FromConfigFile(conffile, handleCache); // load the cache from file
