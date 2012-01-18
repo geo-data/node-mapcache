@@ -459,7 +459,7 @@ int MapCache::EIO_FromConfigFile(eio_req *req) {
     config_req->err = (char *)"Could not create the cache configuration context";
     return 0;
   }
-  config->cfg = mapcache_configuration_create(config->pool);
+  config->cfg = mapcache_configuration_create(config_req->pool);
 
   // create the context for loading the configuration
   mapcache_context *ctx = (mapcache_context*) fcgi_context_create(config_req->pool);
@@ -473,7 +473,7 @@ int MapCache::EIO_FromConfigFile(eio_req *req) {
   // parse the configuration file
   mapcache_configuration_parse(ctx, config_req->conffile, config->cfg, 1);
   if(GC_HAS_ERROR(ctx)) {
-    config_req->err = apr_psprintf(config->pool, "failed to parse %s: %s", config_req->conffile, ctx->get_error_message(ctx));
+    config_req->err = apr_psprintf(config_req->pool, "failed to parse %s: %s", config_req->conffile, ctx->get_error_message(ctx));
     ctx->clear_errors(ctx);
     return 0;
   }
@@ -481,7 +481,7 @@ int MapCache::EIO_FromConfigFile(eio_req *req) {
   // setup the context from the configuration
   mapcache_configuration_post_config(ctx, config->cfg);
   if(GC_HAS_ERROR(ctx)) {
-    config_req->err = apr_psprintf(config->pool, "post-config failed for %s: %s", config_req->conffile, ctx->get_error_message(ctx));
+    config_req->err = apr_psprintf(config_req->pool, "post-config failed for %s: %s", config_req->conffile, ctx->get_error_message(ctx));
     ctx->clear_errors(ctx);
     return 0;
   }
