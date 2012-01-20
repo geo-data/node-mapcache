@@ -206,7 +206,7 @@ public:
   static Handle<Value> FromConfigFileAsync(const Arguments& args)
   {
     HandleScope scope;
-    const char *usage = "usage: MapCache.FromConfigFile(configfile)";
+    const char *usage = "usage: MapCache.FromConfigFile(configfile, callback)";
     if (args.Length() != 2) {
       THROW_CSTR_ERROR(Error, usage);
     }
@@ -478,7 +478,9 @@ EIO_RETURN MapCache::EIO_FromConfigFile(eio_req *req) {
     RETURN_EIO();
   }
 
+#ifdef DEBUG
   ctx->log(ctx, MAPCACHE_DEBUG, (char *)"mapcache node conf file: %s", config_req->conffile);
+#endif
 
   // parse the configuration file
   mapcache_configuration_parse(ctx, config_req->conffile, config->cfg, 1);
