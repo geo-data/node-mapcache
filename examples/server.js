@@ -10,7 +10,7 @@ var path = require('path');     // for file path manipulations
 var http = require('http');     // for the http server
 var url = require('url');       // for url parsing
 
-var mapcache = require('../mapcache'); // the MapCache module
+var mapcache = require('../lib/mapcache'); // the MapCache module
 
 var port = 3000; // which port will the server run on?
 var baseUrl = "http://localhost:" + port; // what is the server url?

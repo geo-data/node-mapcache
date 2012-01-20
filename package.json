@@ -12,7 +12,7 @@
         "type": "git",
         "url": "/data/www/repositories/git/node-geocache"
     },
-    "main": "mapcache.js",
+    "main": "lib/mapcache.js",
     "engines": {
         "node": ">=0.4.0 <0.7"
     },

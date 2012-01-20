@@ -13,7 +13,7 @@ var path = require('path');     // for file path manipulations
 var url = require('url');       // for url parsing
 var child_process = require('child_process'); // for calling `display`
 
-var mapcache = require('../mapcache'); // the MapCache module
+var mapcache = require('../lib/mapcache'); // the MapCache module
 
 var cacheUrl = process.argv[2];
 if (cacheUrl === undefined) {

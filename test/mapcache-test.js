@@ -15,7 +15,7 @@ var vows = require('vows');
 var assert = require('assert');
 var path = require('path');
 
-var mapcache = require('../mapcache');
+var mapcache = require('../lib/mapcache');
 
 vows.describe('mapcache').addBatch({
     // Ensure the module has the expected interface
