@@ -13,7 +13,7 @@ var path = require('path');     // for file path manipulations
 var url = require('url');       // for url parsing
 var child_process = require('child_process'); // for calling `display`
 
-var mapcache = require('../lib/mapcache'); // the MapCache module
+var mapcache = require('mapcache'); // the MapCache module
 
 var cacheUrl = process.argv[2];
 if (cacheUrl === undefined) {
@@ -35,7 +35,10 @@ mapcache.MapCache.FromConfigFile(conffile, function handleCache(err, cache) {
     var urlParts = url.parse(cacheUrl); // parse the requested url
     var baseUrl = '';                   // the hostname and protocol
     if (urlParts.protocol) {
-        baseUrl += urlParts.protocol + '//' + hostname;
+        baseUrl += urlParts.protocol + '//' + urlParts.hostname;
+        if (urlParts.port) {
+             baseUrl += ':' + urlParts.port;
+        }
     }
     var pathInfo = urlParts.pathname || "/"; // generate the PATH_INFO
     var params = urlParts.query || '';       // generate the QUERY_STRING
