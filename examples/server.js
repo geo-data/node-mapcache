@@ -24,7 +24,7 @@ mapcache.MapCache.FromConfigFile(conffile, function handleCache(err, cache) {
 
     // fire up a http server, handling all requests
     http.createServer(function handleCacheRequest(req, res) {
-        var urlParts = url.parse(req.url); // parse the request url
+        var urlParts = url.parse(decodeURIComponent(req.url)); // parse the request url
         var pathInfo = urlParts.pathname || "/"; // generate the PATH_INFO
         var params = urlParts.query || '';       // generate the QUERY_STRING
 

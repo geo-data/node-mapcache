@@ -32,7 +32,7 @@ mapcache.MapCache.FromConfigFile(conffile, function handleCache(err, cache) {
         throw err;              // error loading the configuration file
     }
 
-    var urlParts = url.parse(cacheUrl); // parse the requested url
+    var urlParts = url.parse(decodeURIComponent(cacheUrl)); // parse the requested url
     var baseUrl = '';                   // the hostname and protocol
     if (urlParts.protocol) {
         baseUrl += urlParts.protocol + '//' + urlParts.hostname;
