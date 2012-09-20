@@ -3,18 +3,24 @@
  * LICENSE file.
  */
 
+// Standard headers
+#include <string>
+
+// Node headers
 #include <v8.h>
 #include <node.h>
 #include <node_buffer.h>
 
-extern "C" {
-#include "mapcache.h"
-}
-
+// Apache headers
 #include <apr_strings.h>
 #include <apr_pools.h>
 #include <apr_file_io.h>
 #include <apr_date.h>
+
+// MapCache headers
+extern "C" {
+#include "mapcache.h"
+}
 
 using namespace node;
 using namespace v8;
@@ -22,16 +28,6 @@ using namespace v8;
 #ifdef DEBUG
 #include <iostream>
 using namespace std;
-#endif
-
-// support for node v0.4 (deprecated)
-#include <node_version.h>       // for the version defines
-#if (NODE_MAJOR_VERSION == 0 && NODE_MINOR_VERSION <= 4)
-#define RETURN_EIO() return 0;
-#define EIO_RETURN int
-#else
-#define RETURN_EIO() return;
-#define EIO_RETURN void
 #endif
 
 // These defines are adapted from node-mapserver
@@ -94,17 +90,13 @@ static mapcache_context_fcgi* fcgi_context_create(apr_pool_t *pool) {
 }
 
 /* The structure used for passing cache request data asynchronously
-   between threads using libeio */
-class MapCache;                 // forward declaration for this structure
-struct cache_request {
-  Persistent<Function> cb;
-  MapCache *cache;
-  apr_pool_t* pool;
-  char *baseUrl;
-  char *pathInfo;
-  char *queryString;
-  char *err;
-  mapcache_http_response *response;
+   between threads using libuv. See
+   <http://kkaefer.github.com/node-cpp-modules> for details. */
+struct Baton {
+  // standard Baton interface
+  uv_work_t request;
+  Persistent<Function> callback;
+  std::string error;
 };
 
 // keys for the http response object
@@ -123,22 +115,31 @@ private:
     apr_pool_t *pool;
   };
 
-  /* The structure used for passing config file loading data
-     asynchronously between threads using libeio */
-  struct config_request {
-    Persistent<Function> cb;
+  // Baton for cache requests
+  struct RequestBaton : Baton {
+    // application data
+    MapCache *cache;
+    apr_pool_t* pool;
+    char *baseUrl;
+    char *pathInfo;
+    char *queryString;
+    mapcache_http_response *response;
+  };
+
+  // Baton for configuration file creation
+  struct ConfigBaton : Baton {
+    // application data
     apr_pool_t *pool;
     config_context *config;
     char *conffile;
-    char *err;
   };
 
   config_context *config;
 
-  static EIO_RETURN EIO_Get(eio_req *req);
-  static int EIO_GetAfter(eio_req *req);
-  static EIO_RETURN EIO_FromConfigFile(eio_req *req);
-  static int EIO_FromConfigFileAfter(eio_req *req);
+  static void GetRequestWork(uv_work_t *req);
+  static void GetRequestAfter(uv_work_t *req);
+  static void FromConfigFileWork(uv_work_t *req);
+  static void FromConfigFileAfter(uv_work_t *req);
 public:
 
   static config_context* config_context_create(apr_pool_t *pool) {
@@ -206,17 +207,19 @@ public:
   static Handle<Value> FromConfigFileAsync(const Arguments& args)
   {
     HandleScope scope;
-    const char *usage = "usage: MapCache.FromConfigFile(configfile, callback)";
+
     if (args.Length() != 2) {
-      THROW_CSTR_ERROR(Error, usage);
+      THROW_CSTR_ERROR(Error, "usage: MapCache.FromConfigFile(configfile, callback)");
     }
     REQ_STR_ARG(0, conffile);
-    REQ_FUN_ARG(1, cb);
+    REQ_FUN_ARG(1, callback);
 
     // create the global pool if it does not already exist
     if(global_pool == NULL && apr_pool_create(&global_pool, NULL) != APR_SUCCESS) {
       THROW_CSTR_ERROR(Error, "Could not create the global cache memory pool");
     }
+
+    ConfigBaton *baton = new ConfigBaton();
 
     // create the pool for this configuration context
     apr_pool_t *config_pool = NULL;
@@ -224,40 +227,36 @@ public:
       THROW_CSTR_ERROR(Error, "Could not create the cache configuration memory pool");
     }
 
-    config_request *config_req = (config_request *)apr_pcalloc(config_pool, sizeof(struct config_request));
-    if (!config_req) {
-      apr_pool_destroy(config_pool);
-      THROW_CSTR_ERROR(Error, "malloc in MapCache::FromConfigFileAsync failed");
-    }
+    baton->request.data = baton;
+    baton->pool = config_pool;
+    baton->config = NULL;
+    baton->callback = Persistent<Function>::New(callback);
 
-    config_req->pool = config_pool;
-    config_req->config = NULL;
-    config_req->cb = Persistent<Function>::New(cb);
-
-    config_req->conffile = apr_pstrdup(config_pool, *conffile);
-    if (!config_req->conffile) {
+    baton->conffile = apr_pstrdup(config_pool, *conffile);
+    if (!baton->conffile) {
       apr_pool_destroy(config_pool);
       THROW_CSTR_ERROR(Error, "malloc in MapCache::FromConfigFileAsync failed");
     }
     
-    eio_custom(EIO_FromConfigFile, EIO_PRI_DEFAULT, EIO_FromConfigFileAfter, config_req);
-    ev_ref(EV_DEFAULT_UC);
+    uv_queue_work(uv_default_loop(), &baton->request, FromConfigFileWork, FromConfigFileAfter);
     return Undefined();
   }
 
   static Handle<Value> GetAsync(const Arguments& args)
   {
     HandleScope scope;
-    const char *usage = "usage: cache.get(baseUrl, pathInfo, queryString, callback)";
+
     if (args.Length() != 4) {
-      THROW_CSTR_ERROR(Error, usage);
+      THROW_CSTR_ERROR(Error, "usage: cache.get(baseUrl, pathInfo, queryString, callback)");
     }
     REQ_STR_ARG(0, baseUrl);
     REQ_STR_ARG(1, pathInfo);
     REQ_STR_ARG(2, queryString);
-    REQ_FUN_ARG(3, cb);
+    REQ_FUN_ARG(3, callback);
 
     MapCache* cache = ObjectWrap::Unwrap<MapCache>(args.This());
+    RequestBaton *baton = new RequestBaton();
+    baton->request.data = baton;
     
     // create the pool for this request
     apr_pool_t *req_pool = NULL;
@@ -265,48 +264,41 @@ public:
       THROW_CSTR_ERROR(Error, "Could not create the mapcache request memory pool");
     }
 
-    cache_request *cache_req = (cache_request *)apr_pcalloc(req_pool, sizeof(struct cache_request));
-    if (!cache_req) {
-      apr_pool_destroy(req_pool);
-      THROW_CSTR_ERROR(Error, "malloc in MapCache::GetAsync failed");
-    }
+    baton->pool = req_pool;
+    baton->cache = cache;
+    baton->callback = Persistent<Function>::New(callback);
 
-    cache_req->pool = req_pool;
-    cache_req->cache = cache;
-    cache_req->cb = Persistent<Function>::New(cb);
-
-    cache_req->baseUrl = apr_pstrdup(req_pool, *baseUrl);
-    if (!cache_req->baseUrl) {
+    baton->baseUrl = apr_pstrdup(req_pool, *baseUrl);
+    if (!baton->baseUrl) {
       apr_pool_destroy(req_pool);
       THROW_CSTR_ERROR(Error, "malloc in MapCache::GetAsync failed");
     }
     
-    cache_req->pathInfo = apr_pstrdup(req_pool, *pathInfo);
-    if (!cache_req->pathInfo) {
+    baton->pathInfo = apr_pstrdup(req_pool, *pathInfo);
+    if (!baton->pathInfo) {
       apr_pool_destroy(req_pool);
       THROW_CSTR_ERROR(Error, "malloc in MapCache::GetAsync failed");
     }
     
-    cache_req->queryString = apr_pstrdup(req_pool, *queryString);
-    if (!cache_req->queryString) {
+    baton->queryString = apr_pstrdup(req_pool, *queryString);
+    if (!baton->queryString) {
       apr_pool_destroy(req_pool);
       THROW_CSTR_ERROR(Error, "malloc in MapCache::GetAsync failed");
     }
 
     cache->Ref(); // increment reference count so cache is not garbage collected
 
-    eio_custom(EIO_Get, EIO_PRI_DEFAULT, EIO_GetAfter, cache_req);
-
-    ev_ref(EV_DEFAULT_UC);
-
+    uv_queue_work(uv_default_loop(), &baton->request, GetRequestWork, GetRequestAfter);
     return Undefined();
   }    
 };
 
 // This is run in a separate thread: *No* contact should be made with
 // the Node/V8 world here.
-EIO_RETURN MapCache::EIO_Get(eio_req *req) {
-  cache_request *cache_req = (cache_request *)req->data;
+void MapCache::GetRequestWork(uv_work_t *req) {
+  // No HandleScope!
+
+  RequestBaton *baton =  static_cast<RequestBaton*>(req->data);
   mapcache_context *ctx;
 
   apr_table_t *params;
@@ -314,25 +306,25 @@ EIO_RETURN MapCache::EIO_Get(eio_req *req) {
   mapcache_http_response *http_response = NULL;
 
   // set up the local context
-  ctx = (mapcache_context *)fcgi_context_create(cache_req->pool);
+  ctx = (mapcache_context *)fcgi_context_create(baton->pool);
   if (!ctx) {
-    cache_req->err = (char *)"Could not create the request context";
-    RETURN_EIO();
+    baton->error = "Could not create the request context";
+    return;
   }
 
   // point the context to our cache configuration
-  ctx->config = cache_req->cache->config->cfg;
+  ctx->config = baton->cache->config->cfg;
 
   // parse the query string and dispatch the request
-  params = mapcache_http_parse_param_string(ctx, cache_req->queryString);
-  mapcache_service_dispatch_request(ctx ,&request, cache_req->pathInfo, params, ctx->config);
+  params = mapcache_http_parse_param_string(ctx, baton->queryString);
+  mapcache_service_dispatch_request(ctx ,&request, baton->pathInfo, params, ctx->config);
   if (GC_HAS_ERROR(ctx) || !request) {
     http_response = mapcache_core_respond_to_error(ctx);
   } else {
     switch (request->type) {
     case MAPCACHE_REQUEST_GET_CAPABILITIES: {
       mapcache_request_get_capabilities *req = (mapcache_request_get_capabilities*)request;
-      http_response = mapcache_core_get_capabilities(ctx, request->service, req, cache_req->baseUrl, cache_req->pathInfo, ctx->config);
+      http_response = mapcache_core_get_capabilities(ctx, request->service, req, baton->baseUrl, baton->pathInfo, ctx->config);
       break;
     }
     case MAPCACHE_REQUEST_GET_TILE: {
@@ -371,28 +363,26 @@ EIO_RETURN MapCache::EIO_Get(eio_req *req) {
   }
 
   if (!http_response) {
-    cache_req->err = (char *)"No response was received from the cache";
+    baton->error = "No response was received from the cache";
   }
 
   ctx->clear_errors(ctx);
   
-  cache_req->response = http_response;
-
-  RETURN_EIO();
+  baton->response = http_response;
+  return;
 }
 
-int MapCache::EIO_GetAfter(eio_req *req) {
+void MapCache::GetRequestAfter(uv_work_t *req) {
   HandleScope scope;
 
-  ev_unref(EV_DEFAULT_UC);
-  cache_request *cache_req = (cache_request *)req->data;
-  MapCache *gc = cache_req->cache;
-  mapcache_http_response *response = cache_req->response;
+  RequestBaton *baton = static_cast<RequestBaton*>(req->data);
+  MapCache *gc = baton->cache;
+  mapcache_http_response *response = baton->response;
 
   Handle<Value> argv[2];
 
-  if (cache_req->err) {
-    argv[0] = Exception::Error(String::New(cache_req->err));
+  if (!baton->error.empty()) {
+    argv[0] = Exception::Error(String::New(baton->error.c_str()));
     argv[1] = Undefined();
   } else {
     // convert the http_response to a javascript object
@@ -442,80 +432,79 @@ int MapCache::EIO_GetAfter(eio_req *req) {
 
   // pass the results to the user specified callback function
   TryCatch try_catch;
-  cache_req->cb->Call(Context::GetCurrent()->Global(), 2, argv);
+  baton->callback->Call(Context::GetCurrent()->Global(), 2, argv);
   if (try_catch.HasCaught()) {
     FatalException(try_catch);
   }
   
   // clean up
-  cache_req->cb.Dispose();
-
+  baton->callback.Dispose();
   gc->Unref(); // decrement the cache reference so it can be garbage collected
-
-  apr_pool_destroy(cache_req->pool); // free all memory for this request
-
-  return 0;
+  apr_pool_destroy(baton->pool); // free all memory for this request
+  delete baton;
+  return;
 }
 
 // This is run in a separate thread: *No* contact should be made with
 // the Node/V8 world here.
-EIO_RETURN MapCache::EIO_FromConfigFile(eio_req *req) {
-  config_request *config_req = (config_request *)req->data;
+void MapCache::FromConfigFileWork(uv_work_t *req) {
+  // No HandleScope!
+
+  ConfigBaton *baton = static_cast<ConfigBaton*>(req->data);
 
   // create the configuration context
   config_context *config = NULL;
-  config = config_context_create(config_req->pool);
+  config = config_context_create(baton->pool);
   if (!config) {
-    config_req->err = (char *)"Could not create the cache configuration context";
-    RETURN_EIO();
+    baton->error = "Could not create the cache configuration context";
+    return;
   }
-  config->cfg = mapcache_configuration_create(config_req->pool);
+  config->cfg = mapcache_configuration_create(baton->pool);
 
   // create the context for loading the configuration
-  mapcache_context *ctx = (mapcache_context*) fcgi_context_create(config_req->pool);
+  mapcache_context *ctx = (mapcache_context*) fcgi_context_create(baton->pool);
   if (!ctx) {
-    config_req->err = (char *)"Could not create the context for loading the configuration file";
-    RETURN_EIO();
+    baton->error = "Could not create the context for loading the configuration file";
+    return;
   }
 
 #ifdef DEBUG
-  ctx->log(ctx, MAPCACHE_DEBUG, (char *)"mapcache node conf file: %s", config_req->conffile);
+  ctx->log(ctx, MAPCACHE_DEBUG, (char *)"mapcache node conf file: %s", baton->conffile);
 #endif
 
   // parse the configuration file
-  mapcache_configuration_parse(ctx, config_req->conffile, config->cfg, 1);
+  mapcache_configuration_parse(ctx, baton->conffile, config->cfg, 1);
   if(GC_HAS_ERROR(ctx)) {
-    config_req->err = apr_psprintf(config_req->pool, "failed to parse %s: %s", config_req->conffile, ctx->get_error_message(ctx));
+    baton->error = apr_psprintf(baton->pool, "failed to parse %s: %s", baton->conffile, ctx->get_error_message(ctx));
     ctx->clear_errors(ctx);
-    RETURN_EIO();
+    return;
   }
 
   // setup the context from the configuration
   mapcache_configuration_post_config(ctx, config->cfg);
   if(GC_HAS_ERROR(ctx)) {
-    config_req->err = apr_psprintf(config_req->pool, "post-config failed for %s: %s", config_req->conffile, ctx->get_error_message(ctx));
+    baton->error = apr_psprintf(baton->pool, "post-config failed for %s: %s", baton->conffile, ctx->get_error_message(ctx));
     ctx->clear_errors(ctx);
-    RETURN_EIO();
+    return;
   }
 
-  config_req->config = config;
-  RETURN_EIO();
+  baton->config = config;
+  return;
 }
 
-int MapCache::EIO_FromConfigFileAfter(eio_req *req) {
+void MapCache::FromConfigFileAfter(uv_work_t *req) {
   HandleScope scope;
 
-  ev_unref(EV_DEFAULT_UC);
-  config_request *config_req = (config_request *)req->data;
+  ConfigBaton *baton = static_cast<ConfigBaton*>(req->data);
 
   Handle<Value> argv[2];
 
-  if (config_req->err) {
-    argv[0] = Exception::Error(String::New(config_req->err));
+  if (!baton->error.empty()) {
+    argv[0] = Exception::Error(String::New(baton->error.c_str()));
     argv[1] = Undefined();
-    apr_pool_destroy(config_req->pool);
+    apr_pool_destroy(baton->pool);
   } else {
-    Local<Value> arg  = External::New(config_req->config);
+    Local<Value> arg  = External::New(baton->config);
     Persistent<Object> cache(MapCache::constructor_template->GetFunction()->NewInstance(1, &arg));
 
     argv[0] = Undefined();
@@ -524,15 +513,15 @@ int MapCache::EIO_FromConfigFileAfter(eio_req *req) {
 
   // pass the results to the user specified callback function
   TryCatch try_catch;
-  config_req->cb->Call(Context::GetCurrent()->Global(), 2, argv);
+  baton->callback->Call(Context::GetCurrent()->Global(), 2, argv);
   if (try_catch.HasCaught()) {
     FatalException(try_catch);
   }
   
   // clean up
-  config_req->cb.Dispose();
-  
-  return 0;
+  baton->callback.Dispose();
+  delete baton;
+  return;
 }
 
 
