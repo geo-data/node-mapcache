@@ -120,9 +120,9 @@ private:
     // application data
     MapCache *cache;
     apr_pool_t* pool;
-    char *baseUrl;
-    char *pathInfo;
-    char *queryString;
+    std::string baseUrl;
+    std::string pathInfo;
+    std::string queryString;
     mapcache_http_response *response;
   };
 
@@ -131,7 +131,7 @@ private:
     // application data
     apr_pool_t *pool;
     config_context *config;
-    char *conffile;
+    std::string conffile;
   };
 
   config_context *config;
@@ -231,12 +231,7 @@ public:
     baton->pool = config_pool;
     baton->config = NULL;
     baton->callback = Persistent<Function>::New(callback);
-
-    baton->conffile = apr_pstrdup(config_pool, *conffile);
-    if (!baton->conffile) {
-      apr_pool_destroy(config_pool);
-      THROW_CSTR_ERROR(Error, "malloc in MapCache::FromConfigFileAsync failed");
-    }
+    baton->conffile = *conffile;
     
     uv_queue_work(uv_default_loop(), &baton->request, FromConfigFileWork, FromConfigFileAfter);
     return Undefined();
@@ -267,24 +262,9 @@ public:
     baton->pool = req_pool;
     baton->cache = cache;
     baton->callback = Persistent<Function>::New(callback);
-
-    baton->baseUrl = apr_pstrdup(req_pool, *baseUrl);
-    if (!baton->baseUrl) {
-      apr_pool_destroy(req_pool);
-      THROW_CSTR_ERROR(Error, "malloc in MapCache::GetAsync failed");
-    }
-    
-    baton->pathInfo = apr_pstrdup(req_pool, *pathInfo);
-    if (!baton->pathInfo) {
-      apr_pool_destroy(req_pool);
-      THROW_CSTR_ERROR(Error, "malloc in MapCache::GetAsync failed");
-    }
-    
-    baton->queryString = apr_pstrdup(req_pool, *queryString);
-    if (!baton->queryString) {
-      apr_pool_destroy(req_pool);
-      THROW_CSTR_ERROR(Error, "malloc in MapCache::GetAsync failed");
-    }
+    baton->baseUrl = *baseUrl;
+    baton->pathInfo = *pathInfo;
+    baton->queryString = *queryString;
 
     cache->Ref(); // increment reference count so cache is not garbage collected
 
@@ -316,15 +296,15 @@ void MapCache::GetRequestWork(uv_work_t *req) {
   ctx->config = baton->cache->config->cfg;
 
   // parse the query string and dispatch the request
-  params = mapcache_http_parse_param_string(ctx, baton->queryString);
-  mapcache_service_dispatch_request(ctx ,&request, baton->pathInfo, params, ctx->config);
+  params = mapcache_http_parse_param_string(ctx, (char*) baton->queryString.c_str());
+  mapcache_service_dispatch_request(ctx ,&request, (char*) baton->pathInfo.c_str(), params, ctx->config);
   if (GC_HAS_ERROR(ctx) || !request) {
     http_response = mapcache_core_respond_to_error(ctx);
   } else {
     switch (request->type) {
     case MAPCACHE_REQUEST_GET_CAPABILITIES: {
       mapcache_request_get_capabilities *req = (mapcache_request_get_capabilities*)request;
-      http_response = mapcache_core_get_capabilities(ctx, request->service, req, baton->baseUrl, baton->pathInfo, ctx->config);
+      http_response = mapcache_core_get_capabilities(ctx, request->service, req, (char*) baton->baseUrl.c_str(), (char*) baton->pathInfo.c_str(), ctx->config);
       break;
     }
     case MAPCACHE_REQUEST_GET_TILE: {
@@ -469,13 +449,13 @@ void MapCache::FromConfigFileWork(uv_work_t *req) {
   }
 
 #ifdef DEBUG
-  ctx->log(ctx, MAPCACHE_DEBUG, (char *)"mapcache node conf file: %s", baton->conffile);
+  ctx->log(ctx, MAPCACHE_DEBUG, (char *)"mapcache node conf file: %s", baton->conffile.c_str());
 #endif
 
   // parse the configuration file
-  mapcache_configuration_parse(ctx, baton->conffile, config->cfg, 1);
+  mapcache_configuration_parse(ctx, baton->conffile.c_str(), config->cfg, 1);
   if(GC_HAS_ERROR(ctx)) {
-    baton->error = apr_psprintf(baton->pool, "failed to parse %s: %s", baton->conffile, ctx->get_error_message(ctx));
+    baton->error = apr_psprintf(baton->pool, "failed to parse %s: %s", baton->conffile.c_str(), ctx->get_error_message(ctx));
     ctx->clear_errors(ctx);
     return;
   }
@@ -483,7 +463,7 @@ void MapCache::FromConfigFileWork(uv_work_t *req) {
   // setup the context from the configuration
   mapcache_configuration_post_config(ctx, config->cfg);
   if(GC_HAS_ERROR(ctx)) {
-    baton->error = apr_psprintf(baton->pool, "post-config failed for %s: %s", baton->conffile, ctx->get_error_message(ctx));
+    baton->error = apr_psprintf(baton->pool, "post-config failed for %s: %s", baton->conffile.c_str(), ctx->get_error_message(ctx));
     ctx->clear_errors(ctx);
     return;
   }
