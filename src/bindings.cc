@@ -455,7 +455,7 @@ void MapCache::FromConfigFileWork(uv_work_t *req) {
   // parse the configuration file
   mapcache_configuration_parse(ctx, baton->conffile.c_str(), config->cfg, 1);
   if(GC_HAS_ERROR(ctx)) {
-    baton->error = apr_psprintf(baton->pool, "failed to parse %s: %s", baton->conffile.c_str(), ctx->get_error_message(ctx));
+    baton->error = "failed to parse " + baton->conffile + ": " + ctx->get_error_message(ctx);
     ctx->clear_errors(ctx);
     return;
   }
@@ -463,7 +463,7 @@ void MapCache::FromConfigFileWork(uv_work_t *req) {
   // setup the context from the configuration
   mapcache_configuration_post_config(ctx, config->cfg);
   if(GC_HAS_ERROR(ctx)) {
-    baton->error = apr_psprintf(baton->pool, "post-config failed for %s: %s", baton->conffile.c_str(), ctx->get_error_message(ctx));
+    baton->error = "post-config failed for " + baton->conffile + ": " + ctx->get_error_message(ctx);
     ctx->clear_errors(ctx);
     return;
   }
