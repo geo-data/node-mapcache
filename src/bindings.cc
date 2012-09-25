@@ -1,5 +1,5 @@
 /* This code is PUBLIC DOMAIN, and is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND. See the accompanying 
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND. See the accompanying
  * LICENSE file.
  */
 
@@ -129,7 +129,6 @@ private:
   // Baton for configuration file creation
   struct ConfigBaton : Baton {
     // application data
-    apr_pool_t *pool;
     config_context *config;
     std::string conffile;
   };
@@ -148,7 +147,10 @@ public:
       return NULL;
     }
     ctx->pool = pool;
-    ctx->cfg = NULL;
+    ctx->cfg = mapcache_configuration_create(pool);
+    if (ctx->cfg == NULL) {
+      return NULL;
+    }
 
     return ctx;
   }
@@ -168,7 +170,7 @@ public:
     data_symbol = NODE_PSYMBOL("data");
     mtime_symbol = NODE_PSYMBOL("mtime");
     headers_symbol = NODE_PSYMBOL("headers");
-    
+
     NODE_SET_PROTOTYPE_METHOD(constructor_template, "get", GetAsync);
     NODE_SET_METHOD(constructor_template, "FromConfigFile", FromConfigFileAsync);
 
@@ -224,15 +226,21 @@ public:
     // create the pool for this configuration context
     apr_pool_t *config_pool = NULL;
     if (apr_pool_create(&config_pool, global_pool) != APR_SUCCESS) {
+      delete baton;
       THROW_CSTR_ERROR(Error, "Could not create the cache configuration memory pool");
     }
 
+    // create the configuration context
+    baton->config = config_context_create(config_pool);
+    if (!baton->config) {
+      delete baton;
+      THROW_CSTR_ERROR(Error, "Could not create the cache configuration context");
+    }
+
     baton->request.data = baton;
-    baton->pool = config_pool;
-    baton->config = NULL;
     baton->callback = Persistent<Function>::New(callback);
     baton->conffile = *conffile;
-    
+
     uv_queue_work(uv_default_loop(), &baton->request, FromConfigFileWork, FromConfigFileAfter);
     return Undefined();
   }
@@ -252,10 +260,11 @@ public:
     MapCache* cache = ObjectWrap::Unwrap<MapCache>(args.This());
     RequestBaton *baton = new RequestBaton();
     baton->request.data = baton;
-    
+
     // create the pool for this request
     apr_pool_t *req_pool = NULL;
     if (apr_pool_create(&req_pool, cache->config->pool) != APR_SUCCESS) {
+      delete baton;
       THROW_CSTR_ERROR(Error, "Could not create the mapcache request memory pool");
     }
 
@@ -270,7 +279,7 @@ public:
 
     uv_queue_work(uv_default_loop(), &baton->request, GetRequestWork, GetRequestAfter);
     return Undefined();
-  }    
+  }
 };
 
 // This is run in a separate thread: *No* contact should be made with
@@ -334,7 +343,7 @@ void MapCache::GetRequestWork(uv_work_t *req) {
 
     if (GC_HAS_ERROR(ctx)) {
       http_response = mapcache_core_respond_to_error(ctx);
-    } 
+    }
   }
 
   if (!http_response) {
@@ -347,7 +356,7 @@ void MapCache::GetRequestWork(uv_work_t *req) {
   }
 
   ctx->clear_errors(ctx);
-  
+
   baton->response = http_response;
   return;
 }
@@ -416,7 +425,7 @@ void MapCache::GetRequestAfter(uv_work_t *req) {
   if (try_catch.HasCaught()) {
     FatalException(try_catch);
   }
-  
+
   // clean up
   baton->callback.Dispose();
   gc->Unref(); // decrement the cache reference so it can be garbage collected
@@ -431,18 +440,10 @@ void MapCache::FromConfigFileWork(uv_work_t *req) {
   // No HandleScope!
 
   ConfigBaton *baton = static_cast<ConfigBaton*>(req->data);
-
-  // create the configuration context
-  config_context *config = NULL;
-  config = config_context_create(baton->pool);
-  if (!config) {
-    baton->error = "Could not create the cache configuration context";
-    return;
-  }
-  config->cfg = mapcache_configuration_create(baton->pool);
+  config_context *config = baton->config;
 
   // create the context for loading the configuration
-  mapcache_context *ctx = (mapcache_context*) fcgi_context_create(baton->pool);
+  mapcache_context *ctx = (mapcache_context*) fcgi_context_create(config->pool);
   if (!ctx) {
     baton->error = "Could not create the context for loading the configuration file";
     return;
@@ -468,7 +469,6 @@ void MapCache::FromConfigFileWork(uv_work_t *req) {
     return;
   }
 
-  baton->config = config;
   return;
 }
 
@@ -480,9 +480,9 @@ void MapCache::FromConfigFileAfter(uv_work_t *req) {
   Handle<Value> argv[2];
 
   if (!baton->error.empty()) {
+    apr_pool_destroy(baton->config->pool); // free the memory
     argv[0] = Exception::Error(String::New(baton->error.c_str()));
     argv[1] = Undefined();
-    apr_pool_destroy(baton->pool);
   } else {
     Local<Value> arg  = External::New(baton->config);
     Persistent<Object> cache(MapCache::constructor_template->GetFunction()->NewInstance(1, &arg));
@@ -497,7 +497,7 @@ void MapCache::FromConfigFileAfter(uv_work_t *req) {
   if (try_catch.HasCaught()) {
     FatalException(try_catch);
   }
-  
+
   // clean up
   baton->callback.Dispose();
   delete baton;
