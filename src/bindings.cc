@@ -16,6 +16,7 @@
 #include <apr_pools.h>
 #include <apr_file_io.h>
 #include <apr_date.h>
+#include <apr_thread_mutex.h>
 
 // MapCache headers
 extern "C" {
@@ -52,41 +53,41 @@ using namespace std;
 #define THROW_CSTR_ERROR(TYPE, STR)                         \
   return ThrowException(Exception::TYPE(String::New(STR)));
 
-typedef struct mapcache_context_fcgi mapcache_context_fcgi;
-
 apr_pool_t *global_pool = NULL;
+apr_thread_mutex_t *thread_mutex = NULL;
 
-struct mapcache_context_fcgi {
+typedef struct mapcache_context_node {
   mapcache_context ctx;
-};
+} mapcache_context_node;
 
-static mapcache_context* fcgi_context_clone(mapcache_context *ctx) {
-   mapcache_context_fcgi *newctx = (mapcache_context_fcgi*)apr_pcalloc(ctx->pool,
-         sizeof(mapcache_context_fcgi));
-   mapcache_context *nctx = (mapcache_context*)newctx;
-   mapcache_context_copy(ctx,nctx);
-   apr_pool_create(&nctx->pool,ctx->pool);
-   return nctx;
+static mapcache_context* node_context_clone(mapcache_context *ctx) {
+   mapcache_context *newctx = (mapcache_context*)apr_pcalloc(ctx->pool,
+         sizeof(mapcache_context_node));
+   mapcache_context_copy(ctx,newctx);
+   apr_pool_create(&newctx->pool,ctx->pool);
+   return newctx;
 }
 
-void fcgi_context_log(mapcache_context *c, mapcache_log_level level, char *message, ...) {
+void node_context_log(mapcache_context *c, mapcache_log_level level, char *message, ...) {
   va_list args;
   va_start(args,message);
   fprintf(stderr,"%s\n",apr_pvsprintf(c->pool,message,args));
   va_end(args);
 }
 
-static mapcache_context_fcgi* fcgi_context_create(apr_pool_t *pool) {
-  mapcache_context_fcgi *ctx = (mapcache_context_fcgi *)apr_pcalloc(pool, sizeof(mapcache_context_fcgi));
+static mapcache_context_node* node_context_create(apr_pool_t *pool) {
+  mapcache_context *ctx = (mapcache_context *)apr_pcalloc(pool, sizeof(mapcache_context_node));
   if(!ctx) {
     return NULL;
   }
-  ctx->ctx.pool = pool;
-  mapcache_context_init((mapcache_context*)ctx);
-  ctx->ctx.log = fcgi_context_log;
-  ctx->ctx.clone = fcgi_context_clone;
-  ctx->ctx.config = NULL;
-  return ctx;
+  ctx->pool = pool;
+  ctx->process_pool = pool;
+  ctx->threadlock = thread_mutex;
+  mapcache_context_init(ctx);
+  ctx->log = node_context_log;
+  ctx->clone = node_context_clone;
+  ctx->config = NULL;
+  return (mapcache_context_node *)ctx;
 }
 
 /* The structure used for passing cache request data asynchronously
@@ -221,6 +222,11 @@ public:
       THROW_CSTR_ERROR(Error, "Could not create the global cache memory pool");
     }
 
+    // ensure the thread mutex is initialised
+    if (thread_mutex == NULL && apr_thread_mutex_create(&thread_mutex, APR_THREAD_MUTEX_DEFAULT, global_pool) != APR_SUCCESS) {
+      THROW_CSTR_ERROR(Error, "Could not create the mapcache thread mutex");
+    }
+
     ConfigBaton *baton = new ConfigBaton();
 
     // create the pool for this configuration context
@@ -233,6 +239,7 @@ public:
     // create the configuration context
     baton->config = config_context_create(config_pool);
     if (!baton->config) {
+      apr_pool_destroy(config_pool);
       delete baton;
       THROW_CSTR_ERROR(Error, "Could not create the cache configuration context");
     }
@@ -259,16 +266,14 @@ public:
 
     MapCache* cache = ObjectWrap::Unwrap<MapCache>(args.This());
     RequestBaton *baton = new RequestBaton();
-    baton->request.data = baton;
 
     // create the pool for this request
-    apr_pool_t *req_pool = NULL;
-    if (apr_pool_create(&req_pool, cache->config->pool) != APR_SUCCESS) {
+    if (apr_pool_create(&(baton->pool), cache->config->pool) != APR_SUCCESS) {
       delete baton;
       THROW_CSTR_ERROR(Error, "Could not create the mapcache request memory pool");
     }
 
-    baton->pool = req_pool;
+    baton->request.data = baton;
     baton->cache = cache;
     baton->callback = Persistent<Function>::New(callback);
     baton->baseUrl = *baseUrl;
@@ -289,24 +294,31 @@ void MapCache::GetRequestWork(uv_work_t *req) {
 
   RequestBaton *baton =  static_cast<RequestBaton*>(req->data);
   mapcache_context *ctx;
-
   apr_table_t *params;
   mapcache_request *request = NULL;
   mapcache_http_response *http_response = NULL;
 
   // set up the local context
-  ctx = (mapcache_context *)fcgi_context_create(baton->pool);
+  ctx = (mapcache_context *)node_context_create(baton->pool);
   if (!ctx) {
     baton->error = "Could not create the request context";
     return;
   }
 
+  if (apr_pool_create(&(ctx->process_pool), ctx->pool) != APR_SUCCESS) {
+    baton->error = "Could not create the request context memory pool";
+  }
+
   // point the context to our cache configuration
   ctx->config = baton->cache->config->cfg;
 
+#ifdef DEBUG
+  cout << "Cache request: " << baton->baseUrl << baton->pathInfo << ((baton->queryString.empty()) ? "" : "?") << baton->queryString << endl;
+#endif
+
   // parse the query string and dispatch the request
   params = mapcache_http_parse_param_string(ctx, (char*) baton->queryString.c_str());
-  mapcache_service_dispatch_request(ctx ,&request, (char*) baton->pathInfo.c_str(), params, ctx->config);
+  mapcache_service_dispatch_request(ctx, &request, (char*) baton->pathInfo.c_str(), params, ctx->config);
   if (GC_HAS_ERROR(ctx) || !request) {
     http_response = mapcache_core_respond_to_error(ctx);
   } else {
@@ -365,7 +377,7 @@ void MapCache::GetRequestAfter(uv_work_t *req) {
   HandleScope scope;
 
   RequestBaton *baton = static_cast<RequestBaton*>(req->data);
-  MapCache *gc = baton->cache;
+  MapCache *cache = baton->cache;
   mapcache_http_response *response = baton->response;
 
   Handle<Value> argv[2];
@@ -428,7 +440,7 @@ void MapCache::GetRequestAfter(uv_work_t *req) {
 
   // clean up
   baton->callback.Dispose();
-  gc->Unref(); // decrement the cache reference so it can be garbage collected
+  cache->Unref(); // decrement the cache reference so it can be garbage collected
   apr_pool_destroy(baton->pool); // free all memory for this request
   delete baton;
   return;
@@ -443,7 +455,7 @@ void MapCache::FromConfigFileWork(uv_work_t *req) {
   config_context *config = baton->config;
 
   // create the context for loading the configuration
-  mapcache_context *ctx = (mapcache_context*) fcgi_context_create(config->pool);
+  mapcache_context *ctx = (mapcache_context*) node_context_create(config->pool);
   if (!ctx) {
     baton->error = "Could not create the context for loading the configuration file";
     return;
@@ -509,7 +521,9 @@ static void Cleanup(void* arg) {
   if (global_pool) {
     apr_pool_destroy(global_pool);
   }
-  apr_terminate();
+  if (thread_mutex) {
+    apr_thread_mutex_destroy(thread_mutex);
+  }
 }
 
 Persistent<FunctionTemplate> MapCache::constructor_template;
@@ -521,6 +535,8 @@ extern "C" {
     cout << "Initialising MapCache module" << endl;
 #endif
     apr_initialize();
+    atexit(apr_terminate);
+    apr_pool_initialize();
 
     MapCache::Init(target);
 
