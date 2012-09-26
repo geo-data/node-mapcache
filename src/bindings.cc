@@ -217,7 +217,7 @@ public:
     REQ_FUN_ARG(1, callback);
 
     // create the global pool if it does not already exist
-    if(global_pool == NULL && apr_pool_create(&global_pool, NULL) != APR_SUCCESS) {
+    if (global_pool == NULL && apr_pool_create(&global_pool, NULL) != APR_SUCCESS) {
       THROW_CSTR_ERROR(Error, "Could not create the global cache memory pool");
     }
 
@@ -504,6 +504,13 @@ void MapCache::FromConfigFileAfter(uv_work_t *req) {
   return;
 }
 
+// tear down the APR data structures
+static void Cleanup(void* arg) {
+  if (global_pool) {
+    apr_pool_destroy(global_pool);
+  }
+  apr_terminate();
+}
 
 Persistent<FunctionTemplate> MapCache::constructor_template;
 
@@ -511,11 +518,13 @@ extern "C" {
   static void init (Handle<Object> target)
   {
 #ifdef DEBUG
-    cout << "Initialising MapCache Module" << endl;
+    cout << "Initialising MapCache module" << endl;
 #endif
     apr_initialize();
 
     MapCache::Init(target);
+
+    AtExit(Cleanup);
   }
 
   NODE_MODULE(bindings, init)
