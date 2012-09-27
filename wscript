@@ -64,5 +64,8 @@ def build(bld):
   obj = bld.new_task_gen("cxx", "shlib", "node_addon")
   obj.cxxflags = ["-D_FILE_OFFSET_BITS=64", "-D_LARGEFILE_SOURCE", "-Wall", "-pedantic"]
   obj.target = "bindings"
-  obj.source = "src/bindings.cc"
+  obj.source = [
+    "src/node-mapcache.cpp",
+    "src/mapcache.cpp"
+    ]
   obj.uselib = ['LIBMAPCACHE']

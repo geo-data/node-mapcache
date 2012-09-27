@@ -56,9 +56,6 @@ using std::cout; using std::endl;
 #define THROW_CSTR_ERROR(TYPE, STR)                         \
   return ThrowException(Exception::TYPE(String::New(STR)));
 
-apr_pool_t *global_pool = NULL;
-apr_thread_mutex_t *thread_mutex = NULL;
-
 // The MapCache class
 class MapCache: ObjectWrap {
 public:
@@ -68,8 +65,12 @@ public:
   static Handle<Value> New(const Arguments& args);
   static Handle<Value> FromConfigFileAsync(const Arguments& args);
   static Handle<Value> GetAsync(const Arguments& args);
+  static void Destroy();
 
 private:
+
+  static apr_pool_t *global_pool;
+  static apr_thread_mutex_t *thread_mutex;
 
   /* A association of a mapcache configuration and a memory pool. This
      is the key underlying Mapserver Mapcache data structure that this

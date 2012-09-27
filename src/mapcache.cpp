@@ -1,12 +1,16 @@
-#include "bindings.h"
+#include "mapcache.hpp"
 
-Persistent<FunctionTemplate> MapCache::constructor_template;
+// Initialize the static member variables
+apr_pool_t *MapCache::global_pool = NULL;
+apr_thread_mutex_t *MapCache::thread_mutex = NULL;
 
 // keys for the http response object
 static Persistent<String> code_symbol;
 static Persistent<String> data_symbol;
 static Persistent<String> mtime_symbol;
 static Persistent<String> headers_symbol;
+
+Persistent<FunctionTemplate> MapCache::constructor_template;
 
 void MapCache::Init(Handle<Object> target) { 
   HandleScope scope;
@@ -114,6 +118,18 @@ Handle<Value> MapCache::GetAsync(const Arguments& args) {
 
   uv_queue_work(uv_default_loop(), &baton->request, GetRequestWork, GetRequestAfter);
   return Undefined();
+}
+
+// tear down the APR data structures
+void MapCache::Destroy() {
+  if (thread_mutex) {
+    apr_thread_mutex_destroy(thread_mutex);
+    thread_mutex = NULL;
+  }
+  if (global_pool) {
+    apr_pool_destroy(global_pool);
+    global_pool = NULL;
+  }
 }
 
 // This is run in a separate thread: *No* contact should be made with
@@ -395,32 +411,4 @@ MapCache::config_context* MapCache::CreateConfigContext(apr_pool_t *pool) {
   }
 
   return ctx;
-}
-
-
-// tear down the APR data structures
-static void Cleanup(void* arg) {
-  if (global_pool) {
-    apr_pool_destroy(global_pool);
-  }
-  if (thread_mutex) {
-    apr_thread_mutex_destroy(thread_mutex);
-  }
-}
-
-extern "C" {
-  static void init (Handle<Object> target) {
-#ifdef DEBUG
-    cout << "Initialising MapCache module" << endl;
-#endif
-    apr_initialize();
-    atexit(apr_terminate);
-    apr_pool_initialize();
-
-    MapCache::Init(target);
-
-    AtExit(Cleanup);
-  }
-
-  NODE_MODULE(bindings, init)
 }
