@@ -1,107 +1,6 @@
-/* This code is PUBLIC DOMAIN, and is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND. See the accompanying
- * LICENSE file.
- */
+#include "bindings.h"
 
-// Standard headers
-#include <string>
-
-// Node headers
-#include <v8.h>
-#include <node.h>
-#include <node_buffer.h>
-
-// Apache headers
-#include <apr_strings.h>
-#include <apr_pools.h>
-#include <apr_file_io.h>
-#include <apr_date.h>
-#include <apr_thread_mutex.h>
-
-// MapCache headers
-extern "C" {
-#include "mapcache.h"
-}
-
-using namespace node;
-using namespace v8;
-
-#ifdef DEBUG
-#include <iostream>
-using namespace std;
-#endif
-
-// These defines are adapted from node-mapserver
-#define REQ_STR_ARG(I, VAR)                              \
-  if (args.Length() <= (I) || !args[I]->IsString())      \
-    return ThrowException(Exception::TypeError(          \
-      String::New("Argument " #I " must be a string"))); \
-  String::Utf8Value VAR(args[I]->ToString());
-
-#define REQ_FUN_ARG(I, VAR)                                \
-  if (args.Length() <= (I) || !args[I]->IsFunction())      \
-    return ThrowException(Exception::TypeError(            \
-      String::New("Argument " #I " must be a function"))); \
-  Local<Function> VAR = Local<Function>::Cast(args[I]);
-
-#define REQ_EXT_ARG(I, VAR)                             \
-  if (args.Length() <= (I) || !args[I]->IsExternal())   \
-    return ThrowException(Exception::TypeError(         \
-      String::New("Argument " #I " invalid")));         \
-  Local<External> VAR = Local<External>::Cast(args[I]);
-
-#define THROW_CSTR_ERROR(TYPE, STR)                         \
-  return ThrowException(Exception::TYPE(String::New(STR)));
-
-apr_pool_t *global_pool = NULL;
-apr_thread_mutex_t *thread_mutex = NULL;
-
-typedef struct mapcache_context_node {
-  mapcache_context ctx;
-} mapcache_context_node;
-
-static mapcache_context* node_context_clone(mapcache_context *ctx) {
-   mapcache_context *newctx = (mapcache_context*)apr_pcalloc(ctx->pool,
-         sizeof(mapcache_context_node));
-   mapcache_context_copy(ctx,newctx);
-   apr_pool_create(&newctx->pool,ctx->pool);
-   return newctx;
-}
-
-void node_context_log(mapcache_context *c, mapcache_log_level level, char *message, ...) {
-  va_list args;
-  va_start(args,message);
-  fprintf(stderr,"%s\n",apr_pvsprintf(c->pool,message,args));
-  va_end(args);
-}
-
-static mapcache_context_node* node_context_create(apr_pool_t *pool) {
-  if (!pool) {
-    return NULL;
-  }
-  mapcache_context *ctx = (mapcache_context *)apr_pcalloc(pool, sizeof(mapcache_context_node));
-  if(!ctx) {
-    return NULL;
-  }
-  ctx->pool = pool;
-  ctx->process_pool = pool;
-  ctx->threadlock = thread_mutex;
-  mapcache_context_init(ctx);
-  ctx->log = node_context_log;
-  ctx->clone = node_context_clone;
-  ctx->config = NULL;
-  return (mapcache_context_node *)ctx;
-}
-
-/* The structure used for passing cache request data asynchronously
-   between threads using libuv. See
-   <http://kkaefer.github.com/node-cpp-modules> for details. */
-struct Baton {
-  // standard Baton interface
-  uv_work_t request;
-  Persistent<Function> callback;
-  std::string error;
-};
+Persistent<FunctionTemplate> MapCache::constructor_template;
 
 // keys for the http response object
 static Persistent<String> code_symbol;
@@ -109,189 +8,113 @@ static Persistent<String> data_symbol;
 static Persistent<String> mtime_symbol;
 static Persistent<String> headers_symbol;
 
-// The MapCache class
-class MapCache: ObjectWrap
-{
-private:
-  // a combination of a mapcache_cfg and memory pool
-  typedef struct config_context {
-    mapcache_cfg *cfg;
-    apr_pool_t *pool;
-  } config_context;
+void MapCache::Init(Handle<Object> target) { 
+  HandleScope scope;
 
-  // Baton for cache requests
-  struct RequestBaton : Baton {
-    // application data
-    MapCache *cache;
-    apr_pool_t* pool;
-    std::string baseUrl;
-    std::string pathInfo;
-    std::string queryString;
-    mapcache_http_response *response;
-  };
+  Local<FunctionTemplate> t = FunctionTemplate::New(New);
 
-  // Baton for configuration file creation
-  struct ConfigBaton : Baton {
-    // application data
-    config_context *config;
-    std::string conffile;
-  };
+  constructor_template = Persistent<FunctionTemplate>::New(t);
+  constructor_template->InstanceTemplate()->SetInternalFieldCount(1);
+  constructor_template->SetClassName(String::NewSymbol("MapCache"));
 
-  config_context *config;
+  code_symbol = NODE_PSYMBOL("code");
+  data_symbol = NODE_PSYMBOL("data");
+  mtime_symbol = NODE_PSYMBOL("mtime");
+  headers_symbol = NODE_PSYMBOL("headers");
 
-  static void GetRequestWork(uv_work_t *req);
-  static void GetRequestAfter(uv_work_t *req);
-  static void FromConfigFileWork(uv_work_t *req);
-  static void FromConfigFileAfter(uv_work_t *req);
-public:
+  NODE_SET_PROTOTYPE_METHOD(constructor_template, "get", GetAsync);
+  NODE_SET_METHOD(constructor_template, "FromConfigFile", FromConfigFileAsync);
 
-  static config_context* config_context_create(apr_pool_t *pool) {
-    if (!pool) {
-      return NULL;
-    }
-    config_context *ctx = (config_context *) apr_pcalloc(pool, sizeof(config_context));
-    if (!ctx) {
-      return NULL;
-    }
-    ctx->pool = pool;
-    ctx->cfg = mapcache_configuration_create(pool);
-    if (ctx->cfg == NULL) {
-      return NULL;
-    }
+  target->Set(String::NewSymbol("MapCache"), constructor_template->GetFunction());
+}
 
-    return ctx;
+Handle<Value> MapCache::New(const Arguments& args) {
+  HandleScope scope;
+  if (!args.IsConstructCall()) {
+    THROW_CSTR_ERROR(Error, "MapCache() is expected to be called as a constructor with the `new` keyword");
+  }
+  REQ_EXT_ARG(0, config);
+  (new MapCache((config_context *)config->Value()))->Wrap(args.This());
+  return args.This();
+}
+
+// Factory method to create a cache from a configuration file
+Handle<Value> MapCache::FromConfigFileAsync(const Arguments& args) {
+  HandleScope scope;
+
+  if (args.Length() != 2) {
+    THROW_CSTR_ERROR(Error, "usage: MapCache.FromConfigFile(configfile, callback)");
+  }
+  REQ_STR_ARG(0, conffile);
+  REQ_FUN_ARG(1, callback);
+
+  // create the global pool if it does not already exist
+  if (global_pool == NULL && apr_pool_create(&global_pool, NULL) != APR_SUCCESS) {
+    THROW_CSTR_ERROR(Error, "Could not create the global cache memory pool");
   }
 
-  static Persistent<FunctionTemplate> constructor_template;
-  static void Init(Handle<Object> target)
-  {
-    HandleScope scope;
-
-    Local<FunctionTemplate> t = FunctionTemplate::New(New);
-
-    constructor_template = Persistent<FunctionTemplate>::New(t);
-    constructor_template->InstanceTemplate()->SetInternalFieldCount(1);
-    constructor_template->SetClassName(String::NewSymbol("MapCache"));
-
-    code_symbol = NODE_PSYMBOL("code");
-    data_symbol = NODE_PSYMBOL("data");
-    mtime_symbol = NODE_PSYMBOL("mtime");
-    headers_symbol = NODE_PSYMBOL("headers");
-
-    NODE_SET_PROTOTYPE_METHOD(constructor_template, "get", GetAsync);
-    NODE_SET_METHOD(constructor_template, "FromConfigFile", FromConfigFileAsync);
-
-    target->Set(String::NewSymbol("MapCache"), constructor_template->GetFunction());
+  // ensure the thread mutex is initialised
+  if (thread_mutex == NULL && apr_thread_mutex_create(&thread_mutex, APR_THREAD_MUTEX_DEFAULT, global_pool) != APR_SUCCESS) {
+    THROW_CSTR_ERROR(Error, "Could not create the mapcache thread mutex");
   }
 
-  MapCache(config_context *config) :
-    config(config)
-  {
-    // should throw an error here if !config
-#ifdef DEBUG
-    cout << "Instantiating MapCache instance" << endl;
-#endif
+  ConfigBaton *baton = new ConfigBaton();
+
+  // create the pool for this configuration context
+  apr_pool_t *config_pool = NULL;
+  if (apr_pool_create(&config_pool, global_pool) != APR_SUCCESS) {
+    delete baton;
+    THROW_CSTR_ERROR(Error, "Could not create the cache configuration memory pool");
   }
 
-  ~MapCache()
-  {
-#ifdef DEBUG
-    cout << "Destroying MapCache instance" << endl;
-#endif
-    apr_pool_destroy(config->pool);
-    config = NULL;
+  // create the configuration context
+  baton->config = CreateConfigContext(config_pool);
+  if (!baton->config) {
+    apr_pool_destroy(config_pool);
+    delete baton;
+    THROW_CSTR_ERROR(Error, "Could not create the cache configuration context");
   }
 
-  static Handle<Value> New(const Arguments& args) {
-    HandleScope scope;
-    if (!args.IsConstructCall()) {
-      THROW_CSTR_ERROR(Error, "MapCache() is expected to be called as a constructor with the `new` keyword");
-    }
-    REQ_EXT_ARG(0, config);
-    (new MapCache((config_context *)config->Value()))->Wrap(args.This());
-    return args.This();
+  baton->request.data = baton;
+  baton->callback = Persistent<Function>::New(callback);
+  baton->conffile = *conffile;
+
+  uv_queue_work(uv_default_loop(), &baton->request, FromConfigFileWork, FromConfigFileAfter);
+  return Undefined();
+}
+
+Handle<Value> MapCache::GetAsync(const Arguments& args) {
+  HandleScope scope;
+
+  if (args.Length() != 4) {
+    THROW_CSTR_ERROR(Error, "usage: cache.get(baseUrl, pathInfo, queryString, callback)");
+  }
+  REQ_STR_ARG(0, baseUrl);
+  REQ_STR_ARG(1, pathInfo);
+  REQ_STR_ARG(2, queryString);
+  REQ_FUN_ARG(3, callback);
+
+  MapCache* cache = ObjectWrap::Unwrap<MapCache>(args.This());
+  RequestBaton *baton = new RequestBaton();
+
+  // create the pool for this request
+  if (apr_pool_create(&(baton->pool), cache->config->pool) != APR_SUCCESS) {
+    delete baton;
+    THROW_CSTR_ERROR(Error, "Could not create the mapcache request memory pool");
   }
 
-  // Factory method to create a cache from a configuration file
-  static Handle<Value> FromConfigFileAsync(const Arguments& args)
-  {
-    HandleScope scope;
+  baton->request.data = baton;
+  baton->cache = cache;
+  baton->callback = Persistent<Function>::New(callback);
+  baton->baseUrl = *baseUrl;
+  baton->pathInfo = *pathInfo;
+  baton->queryString = *queryString;
 
-    if (args.Length() != 2) {
-      THROW_CSTR_ERROR(Error, "usage: MapCache.FromConfigFile(configfile, callback)");
-    }
-    REQ_STR_ARG(0, conffile);
-    REQ_FUN_ARG(1, callback);
+  cache->Ref(); // increment reference count so cache is not garbage collected
 
-    // create the global pool if it does not already exist
-    if (global_pool == NULL && apr_pool_create(&global_pool, NULL) != APR_SUCCESS) {
-      THROW_CSTR_ERROR(Error, "Could not create the global cache memory pool");
-    }
-
-    // ensure the thread mutex is initialised
-    if (thread_mutex == NULL && apr_thread_mutex_create(&thread_mutex, APR_THREAD_MUTEX_DEFAULT, global_pool) != APR_SUCCESS) {
-      THROW_CSTR_ERROR(Error, "Could not create the mapcache thread mutex");
-    }
-
-    ConfigBaton *baton = new ConfigBaton();
-
-    // create the pool for this configuration context
-    apr_pool_t *config_pool = NULL;
-    if (apr_pool_create(&config_pool, global_pool) != APR_SUCCESS) {
-      delete baton;
-      THROW_CSTR_ERROR(Error, "Could not create the cache configuration memory pool");
-    }
-
-    // create the configuration context
-    baton->config = config_context_create(config_pool);
-    if (!baton->config) {
-      apr_pool_destroy(config_pool);
-      delete baton;
-      THROW_CSTR_ERROR(Error, "Could not create the cache configuration context");
-    }
-
-    baton->request.data = baton;
-    baton->callback = Persistent<Function>::New(callback);
-    baton->conffile = *conffile;
-
-    uv_queue_work(uv_default_loop(), &baton->request, FromConfigFileWork, FromConfigFileAfter);
-    return Undefined();
-  }
-
-  static Handle<Value> GetAsync(const Arguments& args)
-  {
-    HandleScope scope;
-
-    if (args.Length() != 4) {
-      THROW_CSTR_ERROR(Error, "usage: cache.get(baseUrl, pathInfo, queryString, callback)");
-    }
-    REQ_STR_ARG(0, baseUrl);
-    REQ_STR_ARG(1, pathInfo);
-    REQ_STR_ARG(2, queryString);
-    REQ_FUN_ARG(3, callback);
-
-    MapCache* cache = ObjectWrap::Unwrap<MapCache>(args.This());
-    RequestBaton *baton = new RequestBaton();
-
-    // create the pool for this request
-    if (apr_pool_create(&(baton->pool), cache->config->pool) != APR_SUCCESS) {
-      delete baton;
-      THROW_CSTR_ERROR(Error, "Could not create the mapcache request memory pool");
-    }
-
-    baton->request.data = baton;
-    baton->cache = cache;
-    baton->callback = Persistent<Function>::New(callback);
-    baton->baseUrl = *baseUrl;
-    baton->pathInfo = *pathInfo;
-    baton->queryString = *queryString;
-
-    cache->Ref(); // increment reference count so cache is not garbage collected
-
-    uv_queue_work(uv_default_loop(), &baton->request, GetRequestWork, GetRequestAfter);
-    return Undefined();
-  }
-};
+  uv_queue_work(uv_default_loop(), &baton->request, GetRequestWork, GetRequestAfter);
+  return Undefined();
+}
 
 // This is run in a separate thread: *No* contact should be made with
 // the Node/V8 world here.
@@ -305,7 +128,7 @@ void MapCache::GetRequestWork(uv_work_t *req) {
   mapcache_http_response *http_response = NULL;
 
   // set up the local context
-  ctx = (mapcache_context *)node_context_create(baton->pool);
+  ctx = (mapcache_context *)CreateRequestContext(baton->pool);
   if (!ctx) {
     baton->error = "Could not create the request context";
     return;
@@ -461,7 +284,7 @@ void MapCache::FromConfigFileWork(uv_work_t *req) {
   config_context *config = baton->config;
 
   // create the context for loading the configuration
-  mapcache_context *ctx = (mapcache_context*) node_context_create(config->pool);
+  mapcache_context *ctx = (mapcache_context*) CreateRequestContext(config->pool);
   if (!ctx) {
     baton->error = "Could not create the context for loading the configuration file";
     return;
@@ -522,6 +345,59 @@ void MapCache::FromConfigFileAfter(uv_work_t *req) {
   return;
 }
 
+mapcache_context* MapCache::CloneRequestContext(mapcache_context *ctx) {
+  mapcache_context *newctx = (mapcache_context*)apr_pcalloc(ctx->pool,
+                                                            sizeof(mapcache_context_node));
+  mapcache_context_copy(ctx,newctx);
+  if (apr_pool_create(&newctx->pool,ctx->pool) != APR_SUCCESS) {
+    return NULL;
+  }
+  return newctx;
+}
+
+void MapCache::LogRequestContext(mapcache_context *c, mapcache_log_level level, char *message, ...) {
+  va_list args;
+  va_start(args,message);
+  fprintf(stderr,"%s\n",apr_pvsprintf(c->pool,message,args));
+  va_end(args);
+}
+
+MapCache::mapcache_context_node* MapCache::CreateRequestContext(apr_pool_t *pool) {
+  if (!pool) {
+    return NULL;
+  }
+  mapcache_context *ctx = (mapcache_context *)apr_pcalloc(pool, sizeof(mapcache_context_node));
+  if(!ctx) {
+    return NULL;
+  }
+  ctx->pool = pool;
+  ctx->process_pool = pool;
+  ctx->threadlock = thread_mutex;
+  mapcache_context_init(ctx);
+  ctx->log = LogRequestContext;
+  ctx->clone = CloneRequestContext;
+  ctx->config = NULL;
+  return (mapcache_context_node *)ctx;
+}
+
+MapCache::config_context* MapCache::CreateConfigContext(apr_pool_t *pool) {
+  if (!pool) {
+    return NULL;
+  }
+  config_context *ctx = (config_context *) apr_pcalloc(pool, sizeof(config_context));
+  if (!ctx) {
+    return NULL;
+  }
+  ctx->pool = pool;
+  ctx->cfg = mapcache_configuration_create(pool);
+  if (ctx->cfg == NULL) {
+    return NULL;
+  }
+
+  return ctx;
+}
+
+
 // tear down the APR data structures
 static void Cleanup(void* arg) {
   if (global_pool) {
@@ -532,11 +408,8 @@ static void Cleanup(void* arg) {
   }
 }
 
-Persistent<FunctionTemplate> MapCache::constructor_template;
-
 extern "C" {
-  static void init (Handle<Object> target)
-  {
+  static void init (Handle<Object> target) {
 #ifdef DEBUG
     cout << "Initialising MapCache module" << endl;
 #endif
