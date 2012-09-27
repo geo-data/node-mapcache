@@ -76,6 +76,9 @@ void node_context_log(mapcache_context *c, mapcache_log_level level, char *messa
 }
 
 static mapcache_context_node* node_context_create(apr_pool_t *pool) {
+  if (!pool) {
+    return NULL;
+  }
   mapcache_context *ctx = (mapcache_context *)apr_pcalloc(pool, sizeof(mapcache_context_node));
   if(!ctx) {
     return NULL;
@@ -111,10 +114,10 @@ class MapCache: ObjectWrap
 {
 private:
   // a combination of a mapcache_cfg and memory pool
-  struct config_context {
+  typedef struct config_context {
     mapcache_cfg *cfg;
     apr_pool_t *pool;
-  };
+  } config_context;
 
   // Baton for cache requests
   struct RequestBaton : Baton {
@@ -143,7 +146,10 @@ private:
 public:
 
   static config_context* config_context_create(apr_pool_t *pool) {
-    config_context *ctx = (config_context *) apr_pcalloc(pool, sizeof(config_context *));
+    if (!pool) {
+      return NULL;
+    }
+    config_context *ctx = (config_context *) apr_pcalloc(pool, sizeof(config_context));
     if (!ctx) {
       return NULL;
     }
