@@ -16,6 +16,12 @@ extern "C" {
 
     MapCache::Init(target);
 
+    // versioning information
+    Local<Object> versions = Object::New();
+    versions->Set(String::NewSymbol("mapcache"), String::New(MAPCACHE_VERSION));
+    versions->Set(String::NewSymbol("apr"), String::New(APR_VERSION_STRING));
+    target->Set(String::NewSymbol("versions"), versions);
+
     AtExit(Cleanup);
   }
 }

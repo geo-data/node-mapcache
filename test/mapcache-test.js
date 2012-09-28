@@ -69,6 +69,32 @@ vows.describe('mapcache').addBatch({
                 }
             }
         },
+        'should have a `versions` property': {
+            topic: function (mapcache) {
+                return mapcache.versions;
+            },
+            'which is an object object': function (versions) {
+                assert.isObject(versions);
+            },
+            'which contains the mapcache version': {
+                topic: function (versions) {
+                    return versions.mapcache;
+                },
+                'as a string': function (version) {
+                    assert.isString(version);
+                    assert.isTrue(version.length > 0);
+                }
+            },
+            'which contains the apr version': {
+                topic: function (versions) {
+                    return versions.apr;
+                },
+                'as a string': function (version) {
+                    assert.isString(version);
+                    assert.isTrue(version.length > 0);
+                }
+            }
+        },
         'should have': {
             topic: mapcache.httpCacheHandler,
             'a `httpCacheHandler`': function (httpCacheHandler) {
