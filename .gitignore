@@ -2,3 +2,5 @@ node_modules/
 build/
 .lock-wscript
 mapcache-*.tgz
+doc/html
+doc/latex

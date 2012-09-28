@@ -1,17 +1,48 @@
+/**
+ * @file mapcache.cpp
+ * @brief This defines the primary `MapCache` class.
+ */
+
 #include "mapcache.hpp"
 
-// Initialize the static member variables
+/**
+ * @details This is a global pool from which the underlying mapcache C
+ * code draws its memory.  It is initialised the first time a
+ * `MapCache` instance is created.
+ */
 apr_pool_t *MapCache::global_pool = NULL;
+
+/**
+ * @details This is a global mutex used by the underlying mapcache C
+ * code to serialise cache functionality that is susceptible to race
+ * conditions in multi-threaded applications.  It is initialised the
+ * first time a `MapCache` instance is created.
+ */
 apr_thread_mutex_t *MapCache::thread_mutex = NULL;
 
-// keys for the http response object
-static Persistent<String> code_symbol;
-static Persistent<String> data_symbol;
-static Persistent<String> mtime_symbol;
-static Persistent<String> headers_symbol;
+/**
+ * @defgroup cache_response Properties of the cache response object
+ *
+ * These represent property names of the items present in the response
+ * object returned from a cache request.
+ *
+ * @{
+ */
+Persistent<String> MapCache::code_symbol;
+Persistent<String> MapCache::data_symbol;
+Persistent<String> MapCache::mtime_symbol;
+Persistent<String> MapCache::headers_symbol;
+/**@}*/
 
 Persistent<FunctionTemplate> MapCache::constructor_template;
 
+/**
+ * @details This is called from the module initialisation function
+ * when the module is first loaded by Node. It should only be called
+ * once per process.
+ *
+ * @param target The object representing the module.
+ */
 void MapCache::Init(Handle<Object> target) { 
   HandleScope scope;
 
@@ -32,6 +63,15 @@ void MapCache::Init(Handle<Object> target) {
   target->Set(String::NewSymbol("MapCache"), constructor_template->GetFunction());
 }
 
+/**
+ * @details This is a constructor method used to return a new
+ * `MapCache` instance.
+ *
+ * `args` should contain the following parameters:
+ *
+ * @param config An `External` object wrapping a `config_context`
+ * instance.
+ */
 Handle<Value> MapCache::New(const Arguments& args) {
   HandleScope scope;
   if (!args.IsConstructCall()) {
@@ -42,7 +82,18 @@ Handle<Value> MapCache::New(const Arguments& args) {
   return args.This();
 }
 
-// Factory method to create a cache from a configuration file
+/**
+ * @details This is an asynchronous factory method creating a new
+ * `MapCache` instance from an mapcache XML configuration file.
+ *
+ * `args` should contain the following parameters:
+ *
+ * @param conffile A string representing the configuration file path.
+ *
+ * @param callback A function that is called on error or when the
+ * cache has been created. It should have the signature `callback(err,
+ * cache)`.
+ */
 Handle<Value> MapCache::FromConfigFileAsync(const Arguments& args) {
   HandleScope scope;
 
@@ -52,29 +103,11 @@ Handle<Value> MapCache::FromConfigFileAsync(const Arguments& args) {
   REQ_STR_ARG(0, conffile);
   REQ_FUN_ARG(1, callback);
 
-  // create the global pool if it does not already exist
-  if (global_pool == NULL && apr_pool_create(&global_pool, NULL) != APR_SUCCESS) {
-    THROW_CSTR_ERROR(Error, "Could not create the global cache memory pool");
-  }
-
-  // ensure the thread mutex is initialised
-  if (thread_mutex == NULL && apr_thread_mutex_create(&thread_mutex, APR_THREAD_MUTEX_DEFAULT, global_pool) != APR_SUCCESS) {
-    THROW_CSTR_ERROR(Error, "Could not create the mapcache thread mutex");
-  }
-
   ConfigBaton *baton = new ConfigBaton();
 
-  // create the pool for this configuration context
-  apr_pool_t *config_pool = NULL;
-  if (apr_pool_create(&config_pool, global_pool) != APR_SUCCESS) {
-    delete baton;
-    THROW_CSTR_ERROR(Error, "Could not create the cache configuration memory pool");
-  }
-
   // create the configuration context
-  baton->config = CreateConfigContext(config_pool);
+  baton->config = CreateConfigContext();
   if (!baton->config) {
-    apr_pool_destroy(config_pool);
     delete baton;
     THROW_CSTR_ERROR(Error, "Could not create the cache configuration context");
   }
@@ -87,6 +120,30 @@ Handle<Value> MapCache::FromConfigFileAsync(const Arguments& args) {
   return Undefined();
 }
 
+/**
+ * @details This is an asynchronous method used to retrieve a resource
+ * from the cache. The returned resource is a javascript object
+ * literal with the following properties:
+ *
+ * - `code`: an integer representing the HTTP status code
+ * - `mtime`: a date representing the last modified time
+ * - `data`: a `Buffer` object representing the cached data
+ * - `headers`: the HTTP headers as an object literal
+ *
+ * `args` should contain the following parameters:
+ *
+ * @param baseUrl A string defining the base URL of the cache
+ * resource.
+ *
+ * @param pathInfo A string with the URL `PATH_INFO` data.
+ *
+ * @param queryString A string with the URL `QUERY_STRING` data. This
+ * should not be prefixed with a `?`.
+ *
+ * @param callback A function that is called on error or when the
+ * resource has been created. It should have the signature
+ * `callback(err, resource)`.
+ */
 Handle<Value> MapCache::GetAsync(const Arguments& args) {
   HandleScope scope;
 
@@ -120,7 +177,14 @@ Handle<Value> MapCache::GetAsync(const Arguments& args) {
   return Undefined();
 }
 
-// tear down the APR data structures
+/**
+ * @details An APR memory pool and thread mutex are created when the
+ * first `MapCache` instance is created. This method frees up that
+ * memory and should be called when Node no longer requires this
+ * module.
+ *
+ * @param target The object representing the module.
+ */
 void MapCache::Destroy() {
   if (thread_mutex) {
     apr_thread_mutex_destroy(thread_mutex);
@@ -132,10 +196,15 @@ void MapCache::Destroy() {
   }
 }
 
-// This is run in a separate thread: *No* contact should be made with
-// the Node/V8 world here.
+/**
+ * @details This is called by `GetRequestAsync` and runs in a
+ * different thread to that function.
+ *
+ * @param req The asynchronous libuv request.
+ */
 void MapCache::GetRequestWork(uv_work_t *req) {
-  // No HandleScope!
+  /* No HandleScope! This is run in a separate thread: *No* contact
+     should be made with the Node/V8 world here. */
 
   RequestBaton *baton =  static_cast<RequestBaton*>(req->data);
   mapcache_context *ctx;
@@ -218,6 +287,15 @@ void MapCache::GetRequestWork(uv_work_t *req) {
   return;
 }
 
+/**
+ * @details This is set by `GetRequestAsync` to run after
+ * `GetRequestWork` has finished, being passed the response generated
+ * by the latter and running in the same thread as the former. It
+ * formats the cache response into javascript datatypes and returns
+ * them via the original callback.
+ *
+ * @param req The asynchronous libuv request.
+ */
 void MapCache::GetRequestAfter(uv_work_t *req) {
   HandleScope scope;
 
@@ -291,10 +369,15 @@ void MapCache::GetRequestAfter(uv_work_t *req) {
   return;
 }
 
-// This is run in a separate thread: *No* contact should be made with
-// the Node/V8 world here.
+/**
+ * @details This is called by `FromConfigFileAsync` and runs in a
+ * different thread to that function.
+ *
+ * @param req The asynchronous libuv request.
+ */
 void MapCache::FromConfigFileWork(uv_work_t *req) {
-  // No HandleScope!
+  /* No HandleScope! This is run in a separate thread: *No* contact
+     should be made with the Node/V8 world here. */
 
   ConfigBaton *baton = static_cast<ConfigBaton*>(req->data);
   config_context *config = baton->config;
@@ -329,6 +412,15 @@ void MapCache::FromConfigFileWork(uv_work_t *req) {
   return;
 }
 
+/** 
+ * @details This is set by `FromConfigFileAsync` to run after
+ * `FromConfigFileWork` has finished, being passed the response
+ * generated by the latter and running in the same thread as the
+ * former. It creates a `MapCache` instance and returns it via the
+ * original callback.
+ *
+ * @param req The asynchronous libuv request.
+ */
 void MapCache::FromConfigFileAfter(uv_work_t *req) {
   HandleScope scope;
 
@@ -342,7 +434,7 @@ void MapCache::FromConfigFileAfter(uv_work_t *req) {
     argv[1] = Undefined();
   } else {
     Local<Value> arg  = External::New(baton->config);
-    Persistent<Object> cache(MapCache::constructor_template->GetFunction()->NewInstance(1, &arg));
+    Persistent<Object> cache(constructor_template->GetFunction()->NewInstance(1, &arg));
 
     argv[0] = Undefined();
     argv[1] = scope.Close(cache);
@@ -361,45 +453,23 @@ void MapCache::FromConfigFileAfter(uv_work_t *req) {
   return;
 }
 
-mapcache_context* MapCache::CloneRequestContext(mapcache_context *ctx) {
-  mapcache_context *newctx = (mapcache_context*)apr_pcalloc(ctx->pool,
-                                                            sizeof(mapcache_context_node));
-  mapcache_context_copy(ctx,newctx);
-  if (apr_pool_create(&newctx->pool,ctx->pool) != APR_SUCCESS) {
-    return NULL;
+/**
+ * @details Nothing can be done before a configuration is created so
+ * this method is also used to initialise the global memory pool and
+ * thread mutex if that has not already happened.
+ */
+MapCache::config_context* MapCache::CreateConfigContext() {
+  // create the global pool if it does not already exist
+  if (global_pool == NULL && apr_pool_create(&global_pool, NULL) != APR_SUCCESS) {
+    return NULL; // Could not create the global cache memory pool
   }
-  return newctx;
-}
 
-void MapCache::LogRequestContext(mapcache_context *c, mapcache_log_level level, char *message, ...) {
-  va_list args;
-  va_start(args,message);
-  fprintf(stderr,"%s\n",apr_pvsprintf(c->pool,message,args));
-  va_end(args);
-}
+  // create the pool for this configuration context
+  apr_pool_t *pool = NULL;
+  if (apr_pool_create(&pool, global_pool) != APR_SUCCESS) {
+    return NULL; // Could not create the cache configuration memory pool
+  }
 
-MapCache::mapcache_context_node* MapCache::CreateRequestContext(apr_pool_t *pool) {
-  if (!pool) {
-    return NULL;
-  }
-  mapcache_context *ctx = (mapcache_context *)apr_pcalloc(pool, sizeof(mapcache_context_node));
-  if(!ctx) {
-    return NULL;
-  }
-  ctx->pool = pool;
-  ctx->process_pool = pool;
-  ctx->threadlock = thread_mutex;
-  mapcache_context_init(ctx);
-  ctx->log = LogRequestContext;
-  ctx->clone = CloneRequestContext;
-  ctx->config = NULL;
-  return (mapcache_context_node *)ctx;
-}
-
-MapCache::config_context* MapCache::CreateConfigContext(apr_pool_t *pool) {
-  if (!pool) {
-    return NULL;
-  }
   config_context *ctx = (config_context *) apr_pcalloc(pool, sizeof(config_context));
   if (!ctx) {
     return NULL;
@@ -407,8 +477,65 @@ MapCache::config_context* MapCache::CreateConfigContext(apr_pool_t *pool) {
   ctx->pool = pool;
   ctx->cfg = mapcache_configuration_create(pool);
   if (ctx->cfg == NULL) {
+    apr_pool_destroy(pool);
     return NULL;
   }
 
   return ctx;
+}
+
+/** 
+ * @param pool The memory pool to be used for the context.
+ */
+MapCache::request_context* MapCache::CreateRequestContext(apr_pool_t *pool) {
+  if (!pool or !global_pool) {
+    return NULL;
+  }
+
+  // ensure the thread mutex is initialised
+  if (thread_mutex == NULL && apr_thread_mutex_create(&thread_mutex, APR_THREAD_MUTEX_DEFAULT, global_pool) != APR_SUCCESS) {
+    return NULL;         // Could not create the mapcache thread mutex
+  }
+
+  mapcache_context *ctx = (mapcache_context *)apr_pcalloc(pool, sizeof(request_context));
+  if(!ctx) {
+    return NULL;
+  }
+
+  ctx->pool = pool;
+  ctx->process_pool = pool;
+  ctx->threadlock = thread_mutex;
+  mapcache_context_init(ctx);
+  ctx->log = LogRequestContext;
+  ctx->clone = CloneRequestContext;
+  ctx->config = NULL;
+  return (request_context *)ctx;
+}
+
+/** 
+ * @details This is set as a function pointer to the context created
+ * by `CreateRequestContext`. It is called by the wrapped mapcache
+ * library when required.
+ *
+ * @param ctxt The mapcache context to clone.
+ */  
+mapcache_context* MapCache::CloneRequestContext(mapcache_context *ctx) {
+  mapcache_context *newctx = (mapcache_context*)apr_pcalloc(ctx->pool,
+                                                            sizeof(request_context));
+  mapcache_context_copy(ctx,newctx);
+  if (apr_pool_create(&newctx->pool,ctx->pool) != APR_SUCCESS) {
+    return NULL;
+  }
+  return newctx;
+}
+
+/** 
+ * @details This currently outputs the log to STDERR. It might be nice
+ * to eventually expose it via a Node `EventEmitter`.
+ */  
+void MapCache::LogRequestContext(mapcache_context *c, mapcache_log_level level, char *message, ...) {
+  va_list args;
+  va_start(args,message);
+  fprintf(stderr,"%s\n",apr_pvsprintf(c->pool,message,args));
+  va_end(args);
 }
