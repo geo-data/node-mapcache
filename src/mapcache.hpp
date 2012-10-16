@@ -8,6 +8,7 @@
 
 // Standard headers
 #include <string>
+#include <queue>
 
 // Node headers
 #include <v8.h>
@@ -28,11 +29,6 @@ extern "C" {
 
 using namespace node;
 using namespace v8;
-
-#ifdef DEBUG
-#include <iostream>
-using std::cout; using std::endl;
-#endif
 
 /* The following defines were adapted from the `node-mapserver`
    project. */
@@ -105,6 +101,10 @@ private:
   /// The per-process thread mutex
   static apr_thread_mutex_t *thread_mutex;
 
+  uv_async_t log_async;
+  uv_mutex_t log_mutex;
+  std::queue<std::string> log_queue;
+
   /// An association of a mapcache configuration and memory pool
   struct config_context {
     mapcache_cfg *cfg;
@@ -117,22 +117,23 @@ private:
   /// The mapcache request context
   struct request_context {
     mapcache_context ctx;
+    MapCache *cache;
   };
 
   /// The structure used when performing asynchronous operations
   struct Baton {
     /// The asynchronous request
     uv_work_t request;
+    /// The cache from which the request originated
+    MapCache *cache;
     /// The function executed upon request completion
     Persistent<Function> callback;
-    /// An message set when the request fails
+    /// A message set when the request fails
     std::string error;
   };
 
   /// A Baton specifically used for cache requests
   struct RequestBaton : Baton {
-    /// The cache from which the request originated
-    MapCache *cache;
     /// The memory pool unique to this request
     apr_pool_t* pool;
     /// The base URL of the cache request
@@ -158,20 +159,19 @@ private:
     config(config)
   {
     // should throw an error here if !config
-#ifdef DEBUG
-    cout << "Instantiating MapCache instance" << endl;
-#endif
+    uv_mutex_init(&log_mutex);
+    log_async.data = this;
+    uv_async_init(uv_default_loop(), &log_async, EmitLog);
   }
 
   /// Clear up the configuration context
   ~MapCache() {
-#ifdef DEBUG
-    cout << "Destroying MapCache instance" << endl;
-#endif
     if (config && config->pool) {
       apr_pool_destroy(config->pool);
       config = NULL;
     }
+    uv_close((uv_handle_t*) &log_async, NULL);
+    uv_mutex_destroy(&log_mutex);
   }
 
   /// Instantiate an object
@@ -193,7 +193,7 @@ private:
   static config_context* CreateConfigContext();
 
   /// Create a new mapcache request context
-  static request_context* CreateRequestContext(apr_pool_t *pool);
+  static request_context* CreateRequestContext(apr_pool_t *pool, MapCache *cache);
 
   /// Clone a mapcache request context
   static mapcache_context* CloneRequestContext(mapcache_context *ctx);
@@ -201,6 +201,9 @@ private:
   /// Log information from a request context
   static void LogRequestContext(mapcache_context *c, mapcache_log_level level, char *message, ...);
 
+  static void NullLogRequestContext(mapcache_context *c, mapcache_log_level level, char *message, ...);
+
+  static void EmitLog(uv_async_t *handle, int status /*UNUSED*/);
 };
 
 /**
@@ -212,7 +215,7 @@ private:
  * extract in the `args` array.
  * @param VAR The symbol name of the variable to be created.
 
- * @def REQ_FUN_ARG(I, VAR) 
+ * @def REQ_FUN_ARG(I, VAR)
  *
  * This throws a `TypeError` if the argument is of the wrong type.
  *

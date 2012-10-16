@@ -49,9 +49,6 @@ static void Cleanup(void* arg) {
  */
 extern "C" {
   static void init (Handle<Object> target) {
-#ifdef DEBUG
-    cout << "Initialising MapCache module" << endl;
-#endif
     apr_initialize();
     atexit(apr_terminate);
     apr_pool_initialize();
