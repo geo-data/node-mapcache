@@ -19,8 +19,8 @@ possible from Node with the following advantages:
 However, the module also comes with the following caveats:
 
 * Although it has been used intensively on a number of internal projects the
-  codebase is relatively immature.  It has only been developed and used been
-  used in a Linux environment: patches porting it to other OSes are welcome!
+  codebase is relatively immature.  To date it has only been developed and used
+  in a Linux environment: patches porting it to other OSes are welcome!
 * If you want raw speed use the Apache module or reverse proxy your
   `node-mapcache` app with a web accelerator such as Varnish.  Having said that
   `node-mapcache` shouldn't be slow: benchmarks are welcome!
