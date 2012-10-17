@@ -78,6 +78,16 @@ object literal with the following properties:
 * `data`: a `Buffer` object representing the cached data
 * `headers`: the HTTP headers as an object literal
 
+Versioning information is also available. From the Node REPL:
+
+```
+> var mapcache = require('./mapcache')
+> mapcache.versions
+{ node_mapcache: '0.1.3',
+  mapcache: '0.5-dev',
+  apr: '1.4.5' }
+```
+
 Example
 -------
 

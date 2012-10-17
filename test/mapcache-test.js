@@ -1,3 +1,30 @@
+/******************************************************************************
+ * Copyright (c) 2012, GeoData Institute (www.geodata.soton.ac.uk)
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ *  - Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ *
+ *  - Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *****************************************************************************/
+
 /**
  * MapCache test harness
  *
@@ -14,6 +41,7 @@
 var vows = require('vows');
 var assert = require('assert');
 var path = require('path');
+var fs = require('fs');
 
 var mapcache = require('../lib/mapcache');
 
@@ -76,6 +104,21 @@ vows.describe('mapcache').addBatch({
             'which is an object object': function (versions) {
                 assert.isObject(versions);
             },
+            'which contains the node-mapcache version': {
+                topic: function (versions) {
+                    return versions.node_mapcache;
+                },
+                'is a string': function (version) {
+                    assert.isString(version);
+                    assert.isTrue(version.length > 0);
+                },
+                'which is the same as that in `package.json`': function (version) {
+                    var contents = fs.readFileSync(path.join(__dirname, '..', 'package.json')),
+                        json = JSON.parse(contents),
+                        pversion = json.version;
+                    assert.equal(version, pversion);
+                }
+            },
             'which contains the mapcache version': {
                 topic: function (versions) {
                     return versions.mapcache;
@@ -114,7 +157,7 @@ vows.describe('mapcache').addBatch({
             topic: function (FromConfigFile) {
                 return typeof(FromConfigFile('non-existent-file', function(err, cache) {
                     // do nothing
-                }))
+                }));
             },
             'returning undefined': function (retval) {
                 assert.equal(retval, 'undefined');
@@ -226,7 +269,7 @@ vows.describe('mapcache').addBatch({
         topic: function () {
             mapcache.MapCache.FromConfigFile(path.join(__dirname, 'good.xml'), this.callback);
         },
-        
+
         'requires four valid arguments': {
             topic: function (cache) {
                 return typeof(cache.get('baseUrl', 'pathInfo', 'queryString', function(err, response) {
@@ -332,12 +375,12 @@ vows.describe('mapcache').addBatch({
                 if (err) {
                     return self.callback(err, null);
                 }
-                cache.get(
+                return cache.get(
                     'http://localhost:3000',
                     '/',
                     'LAYERS=test&SERVICE=WMS',
                     self.callback);
-            });            
+            });
         },
         'returns an response': {
             'which is an object': function (response) {
@@ -368,12 +411,12 @@ vows.describe('mapcache').addBatch({
                 if (err) {
                     return self.callback(err, null);
                 }
-                cache.get(
+                return cache.get(
                     'http://localhost:3000',
                     '/',
                     'SERVICE=WMS&REQUEST=GetCapabilities',
                     self.callback);
-            });            
+            });
         },
         'returns an response': {
             'which is an object': function (response) {
@@ -401,12 +444,12 @@ vows.describe('mapcache').addBatch({
                 if (err) {
                     return self.callback(err, null);
                 }
-                cache.get(
+                return cache.get(
                     'http://localhost:3000',
                     '/',
                     'SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1&SRS=EPSG%3A4326&BBOX=-180,-90,180,90&WIDTH=400&HEIGHT=400&LAYERS=test',
                     self.callback);
-            });            
+            });
         },
         'returns an response': {
             'which is an object': function (response) {
@@ -439,12 +482,12 @@ vows.describe('mapcache').addBatch({
                 if (err) {
                     return self.callback(err, null);
                 }
-                cache.get(
+                return cache.get(
                     'http://localhost:3000/',
                     '/tms/1.0.1',
                     '',
                     self.callback);
-            });            
+            });
         },
         'returns an response': {
             'which is an object': function (response) {
@@ -474,12 +517,12 @@ vows.describe('mapcache').addBatch({
                 if (err) {
                     return self.callback(err, null);
                 }
-                cache.get(
+                return cache.get(
                     'http://localhost:3000/',
                     '/tms/1.0.0',
                     '',
                     self.callback);
-            });            
+            });
         },
         'returns an response': {
             'which is an object': function (response) {
@@ -507,12 +550,12 @@ vows.describe('mapcache').addBatch({
                 if (err) {
                     return self.callback(err, null);
                 }
-                cache.get(
+                return cache.get(
                     'http://localhost:3000',
                     '/tms/1.0.0/test@WGS84/0/0/0.png',
                     '',
                     self.callback);
-            });            
+            });
         },
         'returns an response': {
             'which is an object': function (response) {
@@ -545,12 +588,12 @@ vows.describe('mapcache').addBatch({
                 if (err) {
                     return self.callback(err, null);
                 }
-                cache.get(
+                return cache.get(
                     'http://localhost:3000/',
                     '/kml/foo',
                     '',
                     self.callback);
-            });            
+            });
         },
         'returns an response': {
             'which is an object': function (response) {
@@ -580,12 +623,12 @@ vows.describe('mapcache').addBatch({
                 if (err) {
                     return self.callback(err, null);
                 }
-                cache.get(
+                return cache.get(
                     'http://localhost:3000',
                     '/kml/test@WGS84/0/0/0.kml',
                     '',
                     self.callback);
-            });            
+            });
         },
         'returns an response': {
             'which is an object': function (response) {

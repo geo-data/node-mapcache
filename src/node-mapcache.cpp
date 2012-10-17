@@ -87,6 +87,7 @@ extern "C" {
 
     // versioning information
     Local<Object> versions = Object::New();
+    versions->Set(String::NewSymbol("node_mapcache"), String::New(NODE_MAPCACHE_VERSION));
     versions->Set(String::NewSymbol("mapcache"), String::New(MAPCACHE_VERSION));
     versions->Set(String::NewSymbol("apr"), String::New(APR_VERSION_STRING));
     target->Set(String::NewSymbol("versions"), versions);
