@@ -2,7 +2,7 @@ Node.js MapCache Tile Caching Module
 ====================================
 
 This module provides a map tile caching solution for Node.js by creating
-bindings to Mapserver Mapcache (see http://www.mapserver.org/trunk/mapcache).
+bindings to [Mapserver Mapcache](http://www.mapserver.org/trunk/mapcache).
 
 Mapserver MapCache is already deployable as an Apache/Ngnix module and
 CGI/FastCGI binary. This package makes accessing the MapCache functionality
@@ -83,7 +83,7 @@ Example
 
 This provides an example of how to use the MapCache module in combination with
 the Node HTTP module to create a tile caching server. It is available in the
-module as `examples/server.js`.
+package as `examples/server.js`.
 
 ```javascript
 var path = require('path');     // for file path manipulations
@@ -146,14 +146,14 @@ Requirements
 ------------
 
 * Linux OS (although it should work on other Unices)
-* Node.js 0.4 or 0.6
-* MapCache svn revision >= 13003 (although it may work with earlier
-  versions)
+* Node.js >= 0.8
+* Mapserver MapCache 0.5-dev (although it *may* work with other versions)
 
 Installation
 ------------
 
-* Ensure you have installed Mapserver MapCache.
+* Ensure [Mapserver Mapcache](http://www.mapserver.org/trunk/mapcache) is
+  installed.
 * Tell node-mapcache where `libmapcache` resides on the system. Assuming it has
   been installed in `/usr/local/lib` you would use the following command:
 
@@ -164,7 +164,7 @@ Installation
   be provided. Assuming you built it in `/tmp/mapcache` you would use the
   following command:
 
-    `npm config set mapcache:build_dir /tmp/mapserver-svn/mapcache`
+    `npm config set mapcache:build_dir /tmp/mapcache`
 
 * Optionally tell node-mapcache to be built in debug mode:
 
@@ -178,6 +178,12 @@ Installation
   (recommended):
 
    `npm test mapcache`
+
+Bugs
+----
+
+Please add bugs or issues to the
+[GitHub issue tracker](https://github.com/geo-data/node-mapcache).
 
 Documentation
 -------------
