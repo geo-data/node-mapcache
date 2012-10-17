@@ -10,7 +10,7 @@
     "version": "0.1.4",
     "repository": {
         "type": "git",
-        "url": "/data/www/repositories/git/node-geocache"
+        "url": "http://github.com/geo-data/node-mapcache.git"
     },
     "main": "lib/mapcache.js",
     "engines": {

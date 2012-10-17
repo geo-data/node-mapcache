@@ -1,2 +1,7 @@
 .*~
 *~
+*.tgz
+test/test/*
+doc/html/*
+doc/latex/*
+build/*
