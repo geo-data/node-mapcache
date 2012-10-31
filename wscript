@@ -66,6 +66,7 @@ def build(bld):
   obj.target = "bindings"
   obj.source = [
     "src/node-mapcache.cpp",
-    "src/mapcache.cpp"
+    "src/mapcache.cpp",
+    "src/asynclog.cpp"
     ]
   obj.uselib = ['LIBMAPCACHE']

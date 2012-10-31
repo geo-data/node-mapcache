@@ -11,11 +11,11 @@
  *    npm test
  */
 
-var vows = require('vows');
-var assert = require('assert');
-var path = require('path');
-
-var mapcache = require('../lib/mapcache');
+var vows = require('vows'),
+    assert = require('assert'),
+    path = require('path'),
+    events = require('events'),
+    mapcache = require('../lib/mapcache');
 
 vows.describe('mapcache').addBatch({
     // Ensure the module has the expected interface
@@ -50,11 +50,11 @@ vows.describe('mapcache').addBatch({
                 'which cannot be instantiated from javascript': function (MapCache) {
                     var err;
                     try {
-                        err = new MapCache();
+                        err = new MapCache('test');
                     } catch (e) {
                         err = e;
                     }
-                    assert.instanceOf(err, TypeError);
+                    assert.instanceOf(err, Error);
                     assert.equal(err.message, 'Argument 0 invalid');
                 },
                 'which throws an error when called directly': function (MapCache) {
@@ -73,7 +73,7 @@ vows.describe('mapcache').addBatch({
             topic: function (mapcache) {
                 return mapcache.versions;
             },
-            'which is an object object': function (versions) {
+            'which is an object': function (versions) {
                 assert.isObject(versions);
             },
             'which contains the mapcache version': {
@@ -95,6 +95,36 @@ vows.describe('mapcache').addBatch({
                 }
             }
         },
+        'should have a `logLevels` property': {
+            topic: mapcache.logLevels,
+            'which is an object': function (logLevels) {
+                assert.isObject(logLevels);
+            },
+            'which contains the `debug` level': function (logLevels) {
+                assert.isNumber(logLevels.DEBUG);
+            },
+            'which contains the `info` level': function (logLevels) {
+                assert.isNumber(logLevels.INFO);
+            },
+            'which contains the `notice` level': function (logLevels) {
+                assert.isNumber(logLevels.NOTICE);
+            },
+            'which contains the `warn` level': function (logLevels) {
+                assert.isNumber(logLevels.WARN);
+            },
+            'which contains the `error` level': function (logLevels) {
+                assert.isNumber(logLevels.ERROR);
+            },
+            'which contains the `crit` level': function (logLevels) {
+                assert.isNumber(logLevels.CRIT);
+            },
+            'which contains the `alert` level': function (logLevels) {
+                assert.isNumber(logLevels.ALERT);
+            },
+            'which contains the `emerg` level': function (logLevels) {
+                assert.isNumber(logLevels.EMERG);
+            }
+        },
         'should have': {
             topic: mapcache.httpCacheHandler,
             'a `httpCacheHandler`': function (httpCacheHandler) {
@@ -110,11 +140,22 @@ vows.describe('mapcache').addBatch({
             return mapcache.MapCache.FromConfigFile;
         },
 
-        'requires two valid arguments': {
+        'works with two valid arguments': {
             topic: function (FromConfigFile) {
                 return typeof(FromConfigFile('non-existent-file', function(err, cache) {
                     // do nothing
-                }))
+                }));
+            },
+            'returning undefined': function (retval) {
+                assert.equal(retval, 'undefined');
+            }
+        },
+        'works with three valid arguments': {
+            topic: function (FromConfigFile) {
+                var logger = new events.EventEmitter();
+                return typeof(FromConfigFile('non-existent-file', logger, function(err, cache) {
+                    // do nothing
+                }));
             },
             'returning undefined': function (retval) {
                 assert.equal(retval, 'undefined');
@@ -130,20 +171,20 @@ vows.describe('mapcache').addBatch({
             },
             'by throwing an error': function (err) {
                 assert.instanceOf(err, Error);
-                assert.equal(err.message, 'usage: MapCache.FromConfigFile(configfile, callback)');
+                assert.equal(err.message, 'usage: MapCache.FromConfigFile(configfile, [logger], callback)');
             }
         },
-        'fails with three arguments': {
+        'fails with four arguments': {
             topic: function (FromConfigFile) {
                 try {
-                    return FromConfigFile('first-arg', 'second-arg', 'third-arg');
+                    return FromConfigFile('first-arg', 'second-arg', 'third-arg', 'fourth-arg');
                 } catch (e) {
                     return e;
                 }
             },
             'by throwing an error': function (err) {
                 assert.instanceOf(err, Error);
-                assert.equal(err.message, 'usage: MapCache.FromConfigFile(configfile, callback)');
+                assert.equal(err.message, 'usage: MapCache.FromConfigFile(configfile, [logger], callback)');
             }
         },
         'requires a string for the first argument': {
@@ -161,7 +202,7 @@ vows.describe('mapcache').addBatch({
                 assert.equal(err.message, 'Argument 0 must be a string');
             }
         },
-        'requires a function for the second argument': {
+        'requires a function for the second argument with two arguments': {
             topic: function (FromConfigFile) {
                 try {
                     return FromConfigFile('first-arg', 'second-arg');
@@ -172,6 +213,32 @@ vows.describe('mapcache').addBatch({
             'throwing an error otherwise': function (err) {
                 assert.instanceOf(err, TypeError);
                 assert.equal(err.message, 'Argument 1 must be a function');
+            }
+        },
+        'requires an object for the second argument with three arguments': {
+            topic: function (FromConfigFile) {
+                try {
+                    return FromConfigFile('first-arg', 'bad argument', 'third-arg');
+                } catch (e) {
+                    return e;
+                }
+            },
+            'throwing an error otherwise': function (err) {
+                assert.instanceOf(err, TypeError);
+                assert.equal(err.message, 'Argument 1 must be an object');
+            }
+        },
+        'requires a function for the third argument with three arguments': {
+            topic: function (FromConfigFile) {
+                try {
+                    return FromConfigFile('first-arg', new events.EventEmitter(), 'second-arg');
+                } catch (e) {
+                    return e;
+                }
+            },
+            'throwing an error otherwise': function (err) {
+                assert.instanceOf(err, TypeError);
+                assert.equal(err.message, 'Argument 2 must be a function');
             }
         }
     }
@@ -602,6 +669,52 @@ vows.describe('mapcache').addBatch({
                 var string = response.data.toString();
                 assert.equal(string.substr(0, 5), '<?xml');
             }
+        }
+    }
+}).addBatch({
+    // Ensure the logger works as expected
+
+    'requesting an invalid KML cache resource': {
+        topic: function () {
+            var promise = new events.EventEmitter(),
+                logger = new events.EventEmitter(),
+                timeout = setTimeout(function() {
+                    logger.emit('error', new Error('No log was emitted'));
+                }, 2000);
+
+            logger.once('log', function(level, msg) {
+                clearTimeout(timeout);
+                promise.emit('success', level, msg);
+            });
+
+            mapcache.MapCache.FromConfigFile(path.join(__dirname, 'good.xml'), logger, function (err, cache) {
+                if (err) {
+                    clearTimeout(timeout);
+                    return promise.emit('error', err);
+                }
+                return cache.get(
+                    'http://localhost:3000/',
+                    '/kml/foobar',
+                    '',
+                    function (err, response) {
+                        if (err) {
+                            clearTimeout(timeout);
+                            promise.emit('error', err);
+                        }
+                    });
+            });
+
+            return promise;
+        },
+        'logs a level': function (err, level, msg) {
+            assert.isNull(err);
+            assert.isNumber(level);
+            assert.equal(level, 4);
+        },
+        'logs a message': function (err, level, msg) {
+            assert.isNull(err);
+            assert.isString(msg);
+            assert.equal(msg, 'received kml request with invalid layer foobar');
         }
     }
 }).export(module); // Export the Suite

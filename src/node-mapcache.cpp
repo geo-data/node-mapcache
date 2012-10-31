@@ -61,6 +61,18 @@ extern "C" {
     versions->Set(String::NewSymbol("apr"), String::New(APR_VERSION_STRING));
     target->Set(String::NewSymbol("versions"), versions);
 
+    // set the log levels
+    Local<Object> logLevels = Object::New();
+    NODE_MAPCACHE_CONSTANT(logLevels, DEBUG, MAPCACHE_DEBUG);
+    NODE_MAPCACHE_CONSTANT(logLevels, INFO, MAPCACHE_INFO);
+    NODE_MAPCACHE_CONSTANT(logLevels, NOTICE, MAPCACHE_NOTICE);
+    NODE_MAPCACHE_CONSTANT(logLevels, WARN, MAPCACHE_WARN);
+    NODE_MAPCACHE_CONSTANT(logLevels, ERROR, MAPCACHE_ERROR);
+    NODE_MAPCACHE_CONSTANT(logLevels, CRIT, MAPCACHE_CRIT);
+    NODE_MAPCACHE_CONSTANT(logLevels, ALERT, MAPCACHE_ALERT);
+    NODE_MAPCACHE_CONSTANT(logLevels, EMERG, MAPCACHE_EMERG);
+    target->Set(String::NewSymbol("logLevels"), logLevels);
+
     AtExit(Cleanup);
   }
 }
