@@ -38,10 +38,21 @@ and return a response:
 
 ```javascript
 var mapcache = require('mapcache'), // node-mapcache
+    events = require('events'),     // for the logger
+    logger = new events.EventEmitter(),
     fs = require('fs');         // for filesystem operations
 
+// Handle log messages
+logger.on('log', function handleLog(logLevel, logMessage) {
+    if (logLevel >= mapcache.logLevels.WARN) {
+        console.error('OOPS! (%d): %s', logLevel, logMessage);
+    } else {
+        console.log('LOG (%d): %s', logLevel, logMessage);
+    }
+});
+
 // Instantiate a MapCache cache object from the configuration file
-mapcache.MapCache.FromConfigFile('mapcache.xml', function handleCache(err, cache) {
+mapcache.MapCache.FromConfigFile('mapcache.xml', logger, function handleCache(err, cache) {
     if (err) {
         throw err;
     }
@@ -78,12 +89,29 @@ object literal with the following properties:
 * `data`: a `Buffer` object representing the cached data
 * `headers`: the HTTP headers as an object literal
 
-Versioning information is also available. From the Node REPL:
+The logger passed to `FromConfigFile` above is optional: the method accepts
+just two arguments as well.  The available log levels are the same as those in
+the MapCache configuration file.  From the Node REPL:
 
 ```
-> var mapcache = require('./mapcache')
+> var mapcache = require('mapcache');
+> mapcache.logLevels
+{ DEBUG: 0,
+  INFO: 1,
+  NOTICE: 2,
+  WARN: 3,
+  ERROR: 4,
+  CRIT: 5,
+  ALERT: 6,
+  EMERG: 7 }
+```
+
+Versioning information is also available:
+
+```
+> var mapcache = require('mapcache');
 > mapcache.versions
-{ node_mapcache: '0.1.3',
+{ node_mapcache: '0.1.5',
   mapcache: '0.5-dev',
   apr: '1.4.5' }
 ```
@@ -96,25 +124,34 @@ the Node HTTP module to create a tile caching server. It is available in the
 package as `examples/server.js`.
 
 ```javascript
-var path = require('path');     // for file path manipulations
-var http = require('http');     // for the http server
-var url = require('url');       // for url parsing
+var path = require('path'),         // for file path manipulations
+    http = require('http'),         // for the http server
+    url = require('url'),           // for url parsing
+    events = require('events'),     // for the logger
+    logger = new events.EventEmitter(),
+    mapcache = require('mapcache'), // the MapCache module
+    port = 3000,                    // which port will the server run on?
+    baseUrl = "http://localhost:" + port,         // what is the server url?
+    conffile = path.join(__dirname, 'mapcache.xml'); // the location of the config file
 
-var mapcache = require('mapcache'); // the MapCache module
-
-var port = 3000; // which port will the server run on?
-var baseUrl = "http://localhost:" + port; // what is the server url?
-var conffile = path.join(__dirname, 'mapcache.xml'); // the location of the config file
+// Handle log messages
+logger.on('log', function handleLog(logLevel, logMessage) {
+    if (logLevel >= mapcache.logLevels.WARN) {
+        console.error('OOPS! (%d): %s', logLevel, logMessage);
+    } else {
+        console.log('LOG (%d): %s', logLevel, logMessage);
+    }
+});
 
 // Instantiate a MapCache cache object from the configuration file
-mapcache.MapCache.FromConfigFile(conffile, function handleCache(err, cache) {
+mapcache.MapCache.FromConfigFile(conffile, logger, function handleCache(err, cache) {
     if (err) {
         throw err;              // error loading the configuration file
     }
 
     // fire up a http server, handling all requests
     http.createServer(function handleCacheRequest(req, res) {
-        var urlParts = url.parse(req.url); // parse the request url
+        var urlParts = url.parse(decodeURIComponent(req.url)); // parse the request url
         var pathInfo = urlParts.pathname || "/"; // generate the PATH_INFO
         var params = urlParts.query || '';       // generate the QUERY_STRING
 
@@ -142,9 +179,7 @@ mapcache.MapCache.FromConfigFile(conffile, function handleCache(err, cache) {
 
     console.log(
         "Server running at " + baseUrl + " - try the following WMS request:\n" +
-            baseUrl + '?LAYERS=test&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&' +
-            'STYLES=&EXCEPTIONS=application%2Fvnd.ogc.se_inimage&FORMAT=image%2Fjpeg' +
-            '&SRS=EPSG%3A4326&BBOX=-180,-90,180,90&WIDTH=800&HEIGHT=400'
+            baseUrl + '?LAYERS=test&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&STYLES=&EXCEPTIONS=application%2Fvnd.ogc.se_inimage&FORMAT=image%2Fjpeg&SRS=EPSG%3A4326&BBOX=-180,-90,180,90&WIDTH=800&HEIGHT=400'
     );
 });
 ```
@@ -157,7 +192,7 @@ Requirements
 
 * Linux OS (although it should work on other Unices)
 * Node.js >= 0.8
-* Mapserver MapCache 0.5-dev (although it *may* work with other versions)
+* Mapserver MapCache 0.5-dev >= commit 11e8509
 
 Installation
 ------------

@@ -41,6 +41,7 @@
 var vows = require('vows'),
     assert = require('assert'),
     path = require('path'),
+    fs = require('fs'),
     events = require('events'),
     mapcache = require('../lib/mapcache');
 
