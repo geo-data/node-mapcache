@@ -61,7 +61,7 @@ Persistent<String> MapCache::mtime_symbol;
 Persistent<String> MapCache::headers_symbol;
 /**@}*/
 
-Persistent<FunctionTemplate> MapCache::constructor_template;
+Persistent<FunctionTemplate> MapCache::mapcache_template;
 
 /**
  * @details This is called from the module initialisation function
@@ -75,19 +75,19 @@ void MapCache::Init(Handle<Object> target) {
 
   Local<FunctionTemplate> t = FunctionTemplate::New(New);
 
-  constructor_template = Persistent<FunctionTemplate>::New(t);
-  constructor_template->InstanceTemplate()->SetInternalFieldCount(1);
-  constructor_template->SetClassName(String::NewSymbol("MapCache"));
+  mapcache_template = Persistent<FunctionTemplate>::New(t);
+  mapcache_template->InstanceTemplate()->SetInternalFieldCount(1);
+  mapcache_template->SetClassName(String::NewSymbol("MapCache"));
 
   code_symbol = NODE_PSYMBOL("code");
   data_symbol = NODE_PSYMBOL("data");
   mtime_symbol = NODE_PSYMBOL("mtime");
   headers_symbol = NODE_PSYMBOL("headers");
 
-  NODE_SET_PROTOTYPE_METHOD(constructor_template, "get", GetAsync);
-  NODE_SET_METHOD(constructor_template, "FromConfigFile", FromConfigFileAsync);
+  NODE_SET_PROTOTYPE_METHOD(mapcache_template, "get", GetAsync);
+  NODE_SET_METHOD(mapcache_template, "FromConfigFile", FromConfigFileAsync);
 
-  target->Set(String::NewSymbol("MapCache"), constructor_template->GetFunction());
+  target->Set(String::NewSymbol("MapCache"), mapcache_template->GetFunction());
 }
 
 /**
@@ -98,15 +98,29 @@ void MapCache::Init(Handle<Object> target) {
  *
  * @param config An `External` object wrapping a `config_context`
  * instance.
+ *
+ * @param logger An optional `EventEmitter` object
  */
 Handle<Value> MapCache::New(const Arguments& args) {
   HandleScope scope;
   if (!args.IsConstructCall()) {
     THROW_CSTR_ERROR(Error, "MapCache() is expected to be called as a constructor with the `new` keyword");
   }
+
+  Local<Object> logger;
+  switch (args.Length()) {
+  case 2:
+    ASSIGN_OBJ_ARG(1, logger);
+  case 1:
+    break;
+  default:
+    THROW_CSTR_ERROR(Error, "usage: new MapCache(config, [logger])");
+  }
   REQ_EXT_ARG(0, config);
-  (new MapCache((config_context *)config->Value()))->Wrap(args.This());
-  return args.This();
+
+  MapCache* cache = new MapCache((config_context *)config->Value(), logger);
+  cache->Wrap(args.This());
+  return scope.Close(args.This());
 }
 
 /**
@@ -117,6 +131,9 @@ Handle<Value> MapCache::New(const Arguments& args) {
  *
  * @param conffile A string representing the configuration file path.
  *
+ * @param logger [optional] An `EventEmitter` that can be used to capture
+ * mapcache log messages.
+ *
  * @param callback A function that is called on error or when the
  * cache has been created. It should have the signature `callback(err,
  * cache)`.
@@ -124,11 +141,21 @@ Handle<Value> MapCache::New(const Arguments& args) {
 Handle<Value> MapCache::FromConfigFileAsync(const Arguments& args) {
   HandleScope scope;
 
-  if (args.Length() != 2) {
-    THROW_CSTR_ERROR(Error, "usage: MapCache.FromConfigFile(configfile, callback)");
+  Local<Object> emitter;
+  Local<Function> callback;
+  
+  switch (args.Length()) {
+  case 3:
+    ASSIGN_OBJ_ARG(1, emitter);
+    ASSIGN_FUN_ARG(2, callback);
+    break;
+  case 2:
+    ASSIGN_FUN_ARG(1, callback);
+    break;
+  default:
+    THROW_CSTR_ERROR(Error, "usage: MapCache.FromConfigFile(configfile, [logger], callback)");
   }
   REQ_STR_ARG(0, conffile);
-  REQ_FUN_ARG(1, callback);
 
   ConfigBaton *baton = new ConfigBaton();
 
@@ -139,7 +166,16 @@ Handle<Value> MapCache::FromConfigFileAsync(const Arguments& args) {
     THROW_CSTR_ERROR(Error, "Could not create the cache configuration context");
   }
 
+  if (!emitter.IsEmpty()) {
+    Persistent<Object> pemitter = Persistent<Object>::New(emitter);
+    baton->async_log = new AsyncLog(pemitter);
+    baton->logger = pemitter;
+  } else {
+    baton->async_log = NULL;
+  }
+
   baton->request.data = baton;
+  baton->cache = NULL;
   baton->callback = Persistent<Function>::New(callback);
   baton->conffile = *conffile;
 
@@ -197,6 +233,7 @@ Handle<Value> MapCache::GetAsync(const Arguments& args) {
   baton->baseUrl = *baseUrl;
   baton->pathInfo = *pathInfo;
   baton->queryString = *queryString;
+  baton->async_log = (!cache->logger.IsEmpty()) ? new AsyncLog(cache->logger) : NULL;
 
   cache->Ref(); // increment reference count so cache is not garbage collected
 
@@ -240,7 +277,7 @@ void MapCache::GetRequestWork(uv_work_t *req) {
   mapcache_http_response *http_response = NULL;
 
   // set up the local context
-  ctx = (mapcache_context *)CreateRequestContext(baton->pool);
+  ctx = (mapcache_context *)CreateRequestContext(baton->pool, baton->cache, baton->async_log);
   if (!ctx) {
     baton->error = "Could not create the request context";
     return;
@@ -253,9 +290,13 @@ void MapCache::GetRequestWork(uv_work_t *req) {
   // point the context to our cache configuration
   ctx->config = baton->cache->config->cfg;
 
-#ifdef DEBUG
-  cout << "Cache request: " << baton->baseUrl << baton->pathInfo << ((baton->queryString.empty()) ? "" : "?") << baton->queryString << endl;
-#endif
+  #ifdef DEBUG
+  ctx->log(ctx, MAPCACHE_DEBUG, (char *) "cache request: %s%s%s%s",
+           baton->baseUrl.c_str(),
+           baton->pathInfo.c_str(),
+           ((baton->queryString.empty()) ? "" : "?"),
+           baton->queryString.c_str());
+  #endif
 
   // parse the query string and dispatch the request
   params = mapcache_http_parse_param_string(ctx, (char*) baton->queryString.c_str());
@@ -331,6 +372,8 @@ void MapCache::GetRequestAfter(uv_work_t *req) {
   mapcache_http_response *response = baton->response;
 
   Handle<Value> argv[2];
+
+  if (baton->async_log) baton->async_log->close(); // finish with the logger
 
   if (!baton->error.empty()) {
     argv[0] = Exception::Error(String::New(baton->error.c_str()));
@@ -410,7 +453,7 @@ void MapCache::FromConfigFileWork(uv_work_t *req) {
   config_context *config = baton->config;
 
   // create the context for loading the configuration
-  mapcache_context *ctx = (mapcache_context*) CreateRequestContext(config->pool);
+  mapcache_context *ctx = (mapcache_context*) CreateRequestContext(config->pool, baton->cache, baton->async_log);
   if (!ctx) {
     baton->error = "Could not create the context for loading the configuration file";
     return;
@@ -452,16 +495,26 @@ void MapCache::FromConfigFileAfter(uv_work_t *req) {
   HandleScope scope;
 
   ConfigBaton *baton = static_cast<ConfigBaton*>(req->data);
-
   Handle<Value> argv[2];
+
+  if (baton->async_log) baton->async_log->close(); // finish with the logger
 
   if (!baton->error.empty()) {
     apr_pool_destroy(baton->config->pool); // free the memory
     argv[0] = Exception::Error(String::New(baton->error.c_str()));
     argv[1] = Undefined();
   } else {
-    Local<Value> arg  = External::New(baton->config);
-    Persistent<Object> cache(constructor_template->GetFunction()->NewInstance(1, &arg));
+    Local<Value> config = External::New(baton->config);
+    Persistent<Object> cache;
+    if (!baton->logger.IsEmpty()) {
+      Handle<Value> args[2] = {
+        config, // the configuration
+        baton->logger // the log emitter
+      };
+      cache = Persistent<Object>(mapcache_template->GetFunction()->NewInstance(2, args));
+    } else {
+      cache = Persistent<Object>(mapcache_template->GetFunction()->NewInstance(1, &config));
+    }
 
     argv[0] = Undefined();
     argv[1] = scope.Close(cache);
@@ -475,6 +528,7 @@ void MapCache::FromConfigFileAfter(uv_work_t *req) {
   }
 
   // clean up
+  baton->logger.Dispose();
   baton->callback.Dispose();
   delete baton;
   return;
@@ -512,9 +566,17 @@ MapCache::config_context* MapCache::CreateConfigContext() {
 }
 
 /**
+ * @details This creates a context that is used for a interactions with various
+ * mapcache core library functions such as those that create configurations and
+ * request cache resources.
+ *
  * @param pool The memory pool to be used for the context.
+ *
+ * @param cache The optional `MapCache` instance initiating the request.
+ *
+ * @param async_log The optional `AsyncLog` instance used to capture log events.
  */
-MapCache::request_context* MapCache::CreateRequestContext(apr_pool_t *pool) {
+MapCache::request_context* MapCache::CreateRequestContext(apr_pool_t *pool, MapCache *cache, AsyncLog *async_log) {
   if (!pool or !global_pool) {
     return NULL;
   }
@@ -524,6 +586,7 @@ MapCache::request_context* MapCache::CreateRequestContext(apr_pool_t *pool) {
     return NULL;         // Could not create the mapcache thread mutex
   }
 
+  request_context *rctx;
   mapcache_context *ctx = (mapcache_context *)apr_pcalloc(pool, sizeof(request_context));
   if(!ctx) {
     return NULL;
@@ -533,10 +596,14 @@ MapCache::request_context* MapCache::CreateRequestContext(apr_pool_t *pool) {
   ctx->process_pool = pool;
   ctx->threadlock = thread_mutex;
   mapcache_context_init(ctx);
-  ctx->log = LogRequestContext;
+  ctx->log = (async_log) ? async_log->LogRequestContext : NullLogRequestContext;
   ctx->clone = CloneRequestContext;
   ctx->config = NULL;
-  return (request_context *)ctx;
+
+  rctx = (request_context *)ctx;
+  rctx->cache = cache;
+  rctx->async_log = async_log;
+  return rctx;
 }
 
 /**
@@ -549,20 +616,12 @@ MapCache::request_context* MapCache::CreateRequestContext(apr_pool_t *pool) {
 mapcache_context* MapCache::CloneRequestContext(mapcache_context *ctx) {
   mapcache_context *newctx = (mapcache_context*)apr_pcalloc(ctx->pool,
                                                             sizeof(request_context));
+  request_context *rctx = (request_context *) newctx;
   mapcache_context_copy(ctx,newctx);
   if (apr_pool_create(&newctx->pool,ctx->pool) != APR_SUCCESS) {
     return NULL;
   }
+  rctx->cache = ((request_context *) ctx)->cache;
+  rctx->async_log = ((request_context *) ctx)->async_log;
   return newctx;
-}
-
-/**
- * @details This currently outputs the log to STDERR. It might be nice
- * to eventually expose it via a Node `EventEmitter`.
- */
-void MapCache::LogRequestContext(mapcache_context *c, mapcache_log_level level, char *message, ...) {
-  va_list args;
-  va_start(args,message);
-  fprintf(stderr,"%s\n",apr_pvsprintf(c->pool,message,args));
-  va_end(args);
 }
