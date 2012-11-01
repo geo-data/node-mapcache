@@ -285,18 +285,19 @@ void MapCache::GetRequestWork(uv_work_t *req) {
 
   if (apr_pool_create(&(ctx->process_pool), ctx->pool) != APR_SUCCESS) {
     baton->error = "Could not create the request context memory pool";
+    return;
   }
 
   // point the context to our cache configuration
   ctx->config = baton->cache->config->cfg;
 
-  #ifdef DEBUG
+#ifdef DEBUG
   ctx->log(ctx, MAPCACHE_DEBUG, (char *) "cache request: %s%s%s%s",
            baton->baseUrl.c_str(),
            baton->pathInfo.c_str(),
            ((baton->queryString.empty()) ? "" : "?"),
            baton->queryString.c_str());
-  #endif
+#endif
 
   // parse the query string and dispatch the request
   params = mapcache_http_parse_param_string(ctx, (char*) baton->queryString.c_str());
