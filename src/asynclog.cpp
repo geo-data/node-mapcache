@@ -40,11 +40,11 @@
  */
 AsyncLog::AsyncLog(Persistent<Object> emitter) {
   assert(!emitter.IsEmpty());
-  this->emitter = Persistent<Object>::New(emitter); // our own persistent reference
   Handle<Value> emit_val = emitter->Get(String::New("emit"));
   assert(emit_val->IsFunction());
   Handle<Function> emit_func = Handle<Function>::Cast(emit_val); 
   callback = Persistent<Function>::New(emit_func);
+  this->emitter = Persistent<Object>::New(emitter); // our own persistent reference
 
   // ensure we can access this instance from the watcher, as it will be
   // accessed asynchronously via the static `EmitLogs` method.
@@ -88,6 +88,7 @@ void AsyncLog::LogRequestContext(mapcache_context *c, mapcache_log_level level, 
   uv_ref((uv_handle_t *) &(self->async)); // ensure `async` isn't destroyed
   uv_async_send(&(self->async));
 }
+
 /**
  * @details This drains the message queue, emitting each message via the
  * `EventEmitter` handle.  The queue paradigm is necessary as `uv_async_send`
