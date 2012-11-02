@@ -1,6 +1,8 @@
 Node.js MapCache Tile Caching Module
 ====================================
 
+[![Build Status](https://secure.travis-ci.org/geo-data/node-mapcache.png)](http://travis-ci.org/geo-data/node-mapcache)
+
 This module provides a map tile caching solution for Node.js by creating
 bindings to [Mapserver Mapcache](http://www.mapserver.org/trunk/mapcache).
 
