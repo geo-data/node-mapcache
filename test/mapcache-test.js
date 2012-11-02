@@ -749,15 +749,16 @@ vows.describe('mapcache').addBatch({
 
             return promise;
         },
-        'logs a level': function (err, level, msg) {
+        'logs a valid log level': function (err, level, msg) {
             assert.isNull(err);
             assert.isNumber(level);
-            assert.equal(level, 4);
+            assert.equal(level >= mapcache.logLevels.DEBUG, true);
+            assert.equal(level <= mapcache.logLevels.EMERG, true);
         },
         'logs a message': function (err, level, msg) {
             assert.isNull(err);
             assert.isString(msg);
-            assert.equal(msg, 'received kml request with invalid layer foobar');
+            assert.equal(msg.length > 0, true);
         }
     }
 }).export(module); // Export the Suite
