@@ -226,15 +226,20 @@ Installation
    `npm test mapcache`
 
 Alternatively if you are developing or debugging you can bypass `npm` and use
-`node-waf` directly which `npm` itself calls and which has various useful
-flags.  In this case the above instructions translate to:
+`node-waf` directly (which `npm` itself calls).  `node-waf` has various useful
+flags not available to `npm`.  For the latest repository version, the above
+instructions roughly translate to:
 
-    npm_config_mapcache_debug=true \
+    git clone https://github.com/geo-data/node-mapcache.git
+    cd node-mapcache
+
     npm_config_mapcache_lib_dir=/usr/local/lib \
     npm_config_mapcache_build_dir=/tmp/mapcache \
+    npm_config_mapcache_debug=true \
     node-waf configure build
-    
-    /node_modules/.bin/vows --spec ./test/mapcache-test.js
+
+    npm install vows
+    ./node_modules/.bin/vows --spec ./test/mapcache-test.js
 
 Bugs
 ----
