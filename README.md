@@ -31,10 +31,10 @@ API
 ---
 
 The `node-mapcache` API is designed to be simple but flexible.  It binds into
-the underlying `libmapcache` library before the HTTP layer and revolves around
-the concept of a `MapCache` object.  A `MapCache` is derived from a mapcache
-configuration file and is used to make requests to the underlying tile cache
-and return a response:
+the underlying `libmapcache` library before the HTTP layer and around the
+concept of a `MapCache` object.  A `MapCache` instance is derived from a
+standard mapcache configuration file.  It is used to make requests to the
+underlying tile cache and return the response:
 
 ```javascript
 var mapcache = require('mapcache'), // node-mapcache
@@ -90,7 +90,8 @@ object literal with the following properties:
 * `headers`: the HTTP headers as an object literal
 
 The logger passed to `FromConfigFile` above is optional: the method accepts
-just two arguments as well.  The available log levels are the same as those in
+just two arguments as well.  If a logger is passed in it is used for the life
+of the `MapCache` instance.  The available log levels are the same as those in
 the MapCache configuration file.  From the Node REPL:
 
 ```
@@ -223,6 +224,17 @@ Installation
   (recommended):
 
    `npm test mapcache`
+
+Alternatively if you are developing or debugging you can bypass `npm` and use
+`node-waf` directly which `npm` itself calls and which has various useful
+flags.  In this case the above instructions translate to:
+
+    npm_config_mapcache_debug=true \
+    npm_config_mapcache_lib_dir=/usr/local/lib \
+    npm_config_mapcache_build_dir=/tmp/mapcache \
+    node-waf configure build
+    
+    /node_modules/.bin/vows --spec ./test/mapcache-test.js
 
 Bugs
 ----
