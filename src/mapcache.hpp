@@ -343,7 +343,6 @@ private:
     assert(handle->data != NULL);
     AsyncLog* self = static_cast<AsyncLog*>(handle->data);
     delete self;
-    handle->data = NULL;
   }
 };
 
