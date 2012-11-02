@@ -194,7 +194,7 @@ Requirements
 ------------
 
 * Linux OS (although it should work on other Unices)
-* Node.js >= 0.8
+* Node.js 0.8
 * Mapserver MapCache 0.5-dev >= commit 11e8509
 
 Installation

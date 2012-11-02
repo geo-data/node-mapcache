@@ -3,10 +3,10 @@
 language: node_js
 node_js:
   - 0.8
-  - 0.9
 env:
   - MAPCACHE_COMMIT=11e85095a39010f953b34077b7f0824e234e9423 # minimum supported version
   - MAPCACHE_COMMIT=                                         # repository HEAD
 before_install:
   - sudo apt-get install libapr1-dev libaprutil1-dev # mapcache dependencies
   - sh ./test/install-deps.sh /tmp $MAPCACHE_COMMIT # install the dependencies
+script: LD_LIBRARY_PATH=/tmp/mapcache-install/lib npm test
