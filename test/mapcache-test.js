@@ -449,7 +449,7 @@ vows.describe('mapcache').addBatch({
                     self.callback);
             });
         },
-        'returns an response': {
+        'returns a response': {
             'which is an object': function (response) {
                 assert.instanceOf(response, Object);
             },
@@ -485,7 +485,7 @@ vows.describe('mapcache').addBatch({
                     self.callback);
             });
         },
-        'returns an response': {
+        'returns a response': {
             'which is an object': function (response) {
                 assert.instanceOf(response, Object);
             },
@@ -518,7 +518,7 @@ vows.describe('mapcache').addBatch({
                     self.callback);
             });
         },
-        'returns an response': {
+        'returns a response': {
             'which is an object': function (response) {
                 assert.instanceOf(response, Object);
             },
@@ -556,7 +556,7 @@ vows.describe('mapcache').addBatch({
                     self.callback);
             });
         },
-        'returns an response': {
+        'returns a response': {
             'which is an object': function (response) {
                 assert.instanceOf(response, Object);
             },
@@ -591,7 +591,7 @@ vows.describe('mapcache').addBatch({
                     self.callback);
             });
         },
-        'returns an response': {
+        'returns a response': {
             'which is an object': function (response) {
                 assert.instanceOf(response, Object);
             },
@@ -624,7 +624,7 @@ vows.describe('mapcache').addBatch({
                     self.callback);
             });
         },
-        'returns an response': {
+        'returns a response': {
             'which is an object': function (response) {
                 assert.instanceOf(response, Object);
             },
@@ -662,7 +662,7 @@ vows.describe('mapcache').addBatch({
                     self.callback);
             });
         },
-        'returns an response': {
+        'returns a response': {
             'which is an object': function (response) {
                 assert.instanceOf(response, Object);
             },
@@ -697,7 +697,7 @@ vows.describe('mapcache').addBatch({
                     self.callback);
             });
         },
-        'returns an response': {
+        'returns a response': {
             'which is an object': function (response) {
                 assert.instanceOf(response, Object);
             },
