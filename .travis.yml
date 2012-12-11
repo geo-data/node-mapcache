@@ -10,4 +10,3 @@ env:
 before_install:
   - sudo apt-get install libapr1-dev libaprutil1-dev # mapcache dependencies
   - sh ./test/install-deps.sh /tmp $MAPCACHE_COMMIT # install the dependencies
-script: LD_LIBRARY_PATH=/tmp/mapcache-install/lib npm test
