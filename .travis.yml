@@ -9,4 +9,4 @@ env:
   - MAPCACHE_COMMIT=                                         # repository HEAD
 before_install:
   - sudo apt-get install libapr1-dev libaprutil1-dev # mapcache dependencies
-  - sh ./test/install-deps.sh /tmp $MAPCACHE_COMMIT # install the dependencies
+  - sh ./tools/install-deps.sh /tmp $MAPCACHE_COMMIT # install the dependencies
