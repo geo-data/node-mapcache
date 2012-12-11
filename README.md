@@ -18,19 +18,8 @@ possible from Node with the following advantages:
 * **Robustness**: The module has a suite of tests that exercises the whole
   API. This suite has been run through Valgrind to check for memory leaks.
 
-However, the module also comes with the following caveats:
-
-* Although it has been used intensively on a number of internal projects the
-  codebase is relatively immature.  To date it has only been developed and used
-  in a Linux environment: patches porting it to other OSes are welcome!
-* If you want raw speed use the Apache module or reverse proxy your
-  `node-mapcache` app with a web accelerator such as Varnish.  Having said that
-  `node-mapcache` shouldn't be slow: benchmarks are welcome!
-* C/C++ is not the author's day-to-day programming language: code improvements
-  are welcome!
-
-API
----
+Usage
+-----
 
 The `node-mapcache` API is designed to be simple but flexible.  It binds into
 the underlying `libmapcache` library before the HTTP layer and around the
@@ -193,8 +182,12 @@ a cache request to the ImageMagick `display` program.
 Requirements
 ------------
 
-* Linux OS (although it should work on other Unices)
-* Node.js 0.8
+* Linux OS (although it should work on other Unices and ports to Windows and
+  other platforms supported by both Node and Mapserver should be possible:
+  patches welcome!)
+  
+* Node.js >=0.8
+
 * Mapserver MapCache 0.5-dev >= commit 11e8509
 
 Installation
@@ -242,6 +235,16 @@ instructions roughly translate to:
 
     npm install vows
     ./node_modules/.bin/vows --spec ./test/mapcache-test.js
+    
+Recommendations
+---------------
+
+* If you want raw speed use the Apache Mapcache module or reverse proxy your
+  `node-mapcache` app with a web accelerator such as Varnish.  Having said that
+  `node-mapcache` shouldn't be slow: benchmarks are welcome!
+
+* Check out [`node-mapserv`](https://npmjs.org/package/mapserv): this can work
+  well in combination with `node-mapcache` for generating tiled maps.
 
 Bugs
 ----
