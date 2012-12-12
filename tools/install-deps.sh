@@ -27,7 +27,7 @@ if [ -n "${MAPCACHE_COMMIT}" ]; then
 fi
 
 # build and install mapcache
-autoconf || die "autoconf failed"
+autoreconf --force --install || die "autoreconf failed"
 ./configure --prefix=${PREFIX}/mapcache-install --without-sqlite --without-bdb --disable-module || die "configure failed"
 make || die "make failed"
 make install || die "make install failed"
