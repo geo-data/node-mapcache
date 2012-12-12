@@ -21,7 +21,6 @@
           ],
           'cflags': [
             '<!@(python tools/config.py --cflags)',
-            '-pedantic',
             '-Wall'
           ],
         }],
