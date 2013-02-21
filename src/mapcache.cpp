@@ -73,6 +73,12 @@ Persistent<FunctionTemplate> MapCache::mapcache_template;
 void MapCache::Init(Handle<Object> target) {
   HandleScope scope;
 
+  // create the global pool if it does not already exist
+  if (apr_pool_create(&global_pool, NULL) != APR_SUCCESS) {
+    ThrowException(Exception::Error(String::New("Failed to create global memory pool")));
+    return;
+  }
+
   Local<FunctionTemplate> t = FunctionTemplate::New(New);
 
   mapcache_template = Persistent<FunctionTemplate>::New(t);
@@ -254,10 +260,8 @@ void MapCache::Destroy() {
     apr_thread_mutex_destroy(thread_mutex);
     thread_mutex = NULL;
   }
-  if (global_pool) {
-    apr_pool_destroy(global_pool);
-    global_pool = NULL;
-  }
+  apr_pool_destroy(global_pool);
+  global_pool = NULL;
 }
 
 /**
@@ -280,11 +284,6 @@ void MapCache::GetRequestWork(uv_work_t *req) {
   ctx = (mapcache_context *)CreateRequestContext(baton->pool, baton->cache, baton->async_log);
   if (!ctx) {
     baton->error = "Could not create the request context";
-    return;
-  }
-
-  if (apr_pool_create(&(ctx->process_pool), ctx->pool) != APR_SUCCESS) {
-    baton->error = "Could not create the request context memory pool";
     return;
   }
 
@@ -541,11 +540,6 @@ void MapCache::FromConfigFileAfter(uv_work_t *req) {
  * thread mutex if that has not already happened.
  */
 MapCache::config_context* MapCache::CreateConfigContext() {
-  // create the global pool if it does not already exist
-  if (global_pool == NULL && apr_pool_create(&global_pool, NULL) != APR_SUCCESS) {
-    return NULL; // Could not create the global cache memory pool
-  }
-
   // create the pool for this configuration context
   apr_pool_t *pool = NULL;
   if (apr_pool_create(&pool, global_pool) != APR_SUCCESS) {
@@ -578,7 +572,7 @@ MapCache::config_context* MapCache::CreateConfigContext() {
  * @param async_log The optional `AsyncLog` instance used to capture log events.
  */
 MapCache::request_context* MapCache::CreateRequestContext(apr_pool_t *pool, MapCache *cache, AsyncLog *async_log) {
-  if (!pool or !global_pool) {
+  if (!pool) {
     return NULL;
   }
 
@@ -594,7 +588,7 @@ MapCache::request_context* MapCache::CreateRequestContext(apr_pool_t *pool, MapC
   }
 
   ctx->pool = pool;
-  ctx->process_pool = pool;
+  ctx->process_pool = global_pool; // the global pool *is* a per process pool
   ctx->threadlock = thread_mutex;
   mapcache_context_init(ctx);
   ctx->log = (async_log) ? async_log->LogRequestContext : NullLogRequestContext;
