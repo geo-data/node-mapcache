@@ -185,7 +185,10 @@ Handle<Value> MapCache::FromConfigFileAsync(const Arguments& args) {
   baton->callback = Persistent<Function>::New(callback);
   baton->conffile = *conffile;
 
-  uv_queue_work(uv_default_loop(), &baton->request, FromConfigFileWork, FromConfigFileAfter);
+  uv_queue_work(uv_default_loop(),
+                &baton->request,
+                FromConfigFileWork,
+                (uv_after_work_cb) FromConfigFileAfter);
   return Undefined();
 }
 
@@ -243,7 +246,10 @@ Handle<Value> MapCache::GetAsync(const Arguments& args) {
 
   cache->Ref(); // increment reference count so cache is not garbage collected
 
-  uv_queue_work(uv_default_loop(), &baton->request, GetRequestWork, GetRequestAfter);
+  uv_queue_work(uv_default_loop(),
+                &baton->request,
+                GetRequestWork,
+                (uv_after_work_cb) GetRequestAfter);
   return Undefined();
 }
 
