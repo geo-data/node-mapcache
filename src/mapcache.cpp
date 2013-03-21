@@ -231,7 +231,7 @@ Handle<Value> MapCache::GetAsync(const Arguments& args) {
   RequestBaton *baton = new RequestBaton();
 
   // create the pool for this request
-  if (apr_pool_create(&(baton->pool), cache->config->pool) != APR_SUCCESS) {
+  if (apr_pool_create(&(baton->pool), global_pool) != APR_SUCCESS) {
     delete baton;
     THROW_CSTR_ERROR(Error, "Could not create the mapcache request memory pool");
   }
@@ -394,9 +394,11 @@ void MapCache::GetRequestAfter(uv_work_t *req) {
       result->Set(mtime_symbol, Date::New(apr_time_as_msec(response->mtime)));
     }
 
-    // set the response data as a Node Buffer object
+    // set the response data as a Node Buffer object. This is zero-copied from
+    // mapcache and free'd when the buffer is garbage collected.
     if (response->data) {
-      result->Set(data_symbol, Buffer::New((char *)response->data->buf, response->data->size)->handle_);
+      result->Set(data_symbol,
+                  Buffer::New((char *)response->data->buf, response->data->size, FreeBuffer, (void *)baton->pool)->handle_);
     }
 
     // Set the response headers as a javascript object with header
@@ -440,7 +442,6 @@ void MapCache::GetRequestAfter(uv_work_t *req) {
   // clean up
   baton->callback.Dispose();
   cache->Unref(); // decrement the cache reference so it can be garbage collected
-  apr_pool_destroy(baton->pool); // free all memory for this request
   delete baton;
   return;
 }
