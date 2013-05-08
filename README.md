@@ -194,20 +194,18 @@ Installation
 ------------
 
 * Ensure [Mapserver Mapcache](http://www.mapserver.org/trunk/mapcache) is
-  installed.
-* Tell node-mapcache where `libmapcache` resides on the system. Assuming it has
-  been installed in `/usr/local/lib` you would use the following command:
+  installed.  It should be built from source as we need the build directory in
+  the next step:
 
-    `npm config set mapcache:lib_dir /usr/local/lib`
-
-* Tell node-mapcache where to find the MapCache include files. These are not
-  installed in the system by MapCache so a valid mapcache build directory must
-  be provided. Assuming you built it in `/tmp/mapcache` you would use the
+* Point node-mapcache to the MapCache build directory. These are not installed
+  in the system by MapCache so a valid mapcache build directory must be
+  provided. Assuming you built it in `/tmp/mapcache` you would use the
   following command:
 
     `npm config set mapcache:build_dir /tmp/mapcache`
 
-* Optionally tell node-mapcache to be built in debug mode:
+* Optionally tell node-mapcache to be built in debug mode.  This provides more
+  verbose logging output as well as enabling compiler debugger flags:
 
     `npm config set mapcache:debug true`
 
@@ -221,17 +219,17 @@ Installation
    `npm test mapcache`
 
 Alternatively if you are developing or debugging you can bypass `npm` and use
-`node-waf` directly (which `npm` itself calls).  `node-waf` has various useful
+`node-gyp` directly (which `npm` itself calls).  `node-gyp` has various useful
 flags not available to `npm`.  For the latest repository version, the above
 instructions roughly translate to:
 
     git clone https://github.com/geo-data/node-mapcache.git
     cd node-mapcache
 
-    npm_config_mapcache_lib_dir=/usr/local/lib \
+    npm install node-gyp
     npm_config_mapcache_build_dir=/tmp/mapcache \
     npm_config_mapcache_debug=true \
-    node-waf configure build
+    ./node_modules/.bin/node-gyp configure build
 
     npm install vows
     ./node_modules/.bin/vows --spec ./test/mapcache-test.js
@@ -242,6 +240,12 @@ Recommendations
 * If you want raw speed use the Apache Mapcache module or reverse proxy your
   `node-mapcache` app with a web accelerator such as Varnish.  Having said that
   `node-mapcache` shouldn't be slow: benchmarks are welcome!
+
+* When using the Berkeley DB (BDB) as a cache backend for multiple tilesets
+  stability is improved by having a separate filesystem directory for each
+  tileset: this seems to be because the BDB system files (e.g. `__db.001`) are
+  created on a per directory basis and organising them discretely prevents them
+  having to manage more than one BDB database.
 
 * Check out [`node-mapserv`](https://npmjs.org/package/mapserv): this can work
   well in combination with `node-mapcache` for generating tiled maps.
