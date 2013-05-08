@@ -259,12 +259,6 @@ private:
   static void NullLogRequestContext(mapcache_context *c, mapcache_log_level level, char *message, ...) {
     return;
   }
-
-  /// Free data zero-copied to a `Buffer`
-  static void FreeBuffer(char *data, void *hint) {
-    apr_pool_destroy((apr_pool_t *)hint); // free all memory for this request
-    data = NULL;
-  }
 };
 
 /**
