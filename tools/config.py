@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python2
 
 ##############################################################################
@@ -38,42 +39,111 @@ from optparse import OptionParser
 import os
 import re
 
-def get_lib_dir():
-    return os.environ.get('npm_config_mapcache_lib_dir', '')
+class ConfigError(Exception):
+    pass
 
-def get_include_dir():
-    try:
-        build_dir = os.environ['npm_config_mapcache_build_dir']
-    except KeyError:
+class Config(object):
+    """Base Class for obtaining mapcache configuration information"""
+
+    def __init__(self, build_dir):
+        self.build_dir = build_dir
+
+    def getLibDir(self):
+        return os.environ.get('npm_config_mapcache_lib_dir', '')
+
+    def getIncludeDir(self):
+        return os.path.join(self.build_dir, 'include')
+
+    def getCflags(self):
+        # add debugging flags and defines
+        if 'npm_config_mapcache_debug' in os.environ:
+            return '-DDEBUG -g -ggdb'
         return ''
 
-    return os.path.join(build_dir, 'include')
+class AutoconfConfig(Config):
+    """Class for obtaining mapcache configuration pre mapcache 1.0
 
-def get_cflags():
-    try:
-        build_dir = os.environ['npm_config_mapcache_build_dir']
-    except KeyError:
-        raise EnvironmentError('`npm config set mapcache:build_dir` has not been called')
+    Mapcache uses autotools for building and configuration in this version.
+    """
 
-    makefile_inc = os.path.join(build_dir, 'Makefile.inc')
-    
-    # add includes from the Makefile
-    p = re.compile('^[A-Z]+_INC *= *(.+)$') # match an include header
-    matches = []
-    with open(makefile_inc, 'r') as f:
-        for line in f:
-            match = p.match(line)
-            if match:
-                arg = match.groups()[0].strip()
-                if arg:
-                    matches.append(arg)
+    def __init__(self, *args, **kwargs):
+        super(AutoconfConfig, self).__init__(*args, **kwargs)
+        makefile_inc = os.path.join(self.build_dir, 'Makefile.inc')
+        if not os.path.exists(makefile_inc):
+            raise ConfigError('Expected `Makefile.inc` in %s' % self.build_dir)
 
-    # add debugging flags and defines
-    if 'npm_config_mapcache_debug' in os.environ:
-        matches.extend(["-DDEBUG", "-ggdb", "-pedantic"])
+        self.makefile_inc = makefile_inc
 
-    cflags = ' '.join(matches)
-    return cflags
+    def getLibDir(self):
+        p = re.compile('^prefix *= *(.+)$') # match the prefix
+        with open(self.makefile_inc, 'r') as f:
+            for line in f:
+                match = p.match(line)
+                if match:
+                    arg = match.groups()[0].strip()
+                    if arg:
+                        return os.path.join(arg, 'lib')
+        return ''
+
+    def getCflags(self):
+        # add includes from the Makefile
+        p = re.compile('^[A-Z]+_INC *= *(.+)$') # match an include header
+        matches = []
+        with open(self.makefile_inc, 'r') as f:
+            for line in f:
+                match = p.match(line)
+                if match:
+                    arg = match.groups()[0].strip()
+                    if arg:
+                        matches.append(arg)
+
+        debug_flags = super(AutoconfConfig, self).getCflags()
+        if debug_flags:
+            matches.append(debug_flags)
+
+        return ' '.join(matches)
+
+class CmakeConfig(Config):
+    """Class for obtaining mapcache configuration for versions >= 1.0
+
+    Mapcache uses Cmake for building and configuration in this version.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super(CmakeConfig, self).__init__(*args, **kwargs)
+        cmake_cache = os.path.join(self.build_dir, 'CMakeCache.txt')
+        if not os.path.exists(cmake_cache):
+            raise ConfigError('Expected `CMakeCache.txt` in %s' % self.build_dir)
+
+        self.cmake_cache = cmake_cache
+
+    def getLibDir(self):
+        p = re.compile('^CMAKE_INSTALL_PREFIX:PATH *= *(.+)$') # match the prefix
+
+        with open(self.cmake_cache, 'r') as f:
+            for line in f:
+                match = p.match(line)
+                if match:
+                    arg = match.groups()[0].strip()
+                    if arg:
+                        return os.path.join(arg, 'lib')
+
+        return ''
+
+    def getIncludeDir(self):
+        dirs = [os.path.join(self.build_dir, 'include')]
+        p = re.compile('^\w+_INCLUDE_DIR:PATH *= *(.+)$') # match a library directory
+
+        with open(self.cmake_cache, 'r') as f:
+            for line in f:
+                match = p.match(line)
+                if match:
+                    arg = match.groups()[0].strip()
+                    if arg:
+                        dirs.append(arg)
+
+        return ' '.join(dirs)
+
 
 parser = OptionParser()
 parser.add_option("--include",
@@ -94,19 +164,31 @@ parser.add_option("--cflags",
 
 (options, args) = parser.parse_args()
 
+try:
+    build_dir = os.environ['npm_config_mapcache_build_dir']
+except KeyError:
+    raise EnvironmentError('`npm config set mapcache:build_dir` has not been called')
+
+# get the config object, trying the legacy autoconf build sytem first and
+# falling back to the new cmake system
+try:
+    config = AutoconfConfig(build_dir)
+except ConfigError:
+    config = CmakeConfig(build_dir)
+
 if options.include:
-    print get_include_dir()
+    print config.getIncludeDir()
 
 if options.libraries:
-    lib_dir = get_lib_dir()
+    lib_dir = config.getLibDir()
     if lib_dir:
         print "-L%s" % lib_dir
 
 if options.ldflags:
     # write the library path into the resulting binary
-    lib_dir = get_lib_dir()
+    lib_dir = config.getLibDir()
     if lib_dir:
         print "-Wl,-rpath=%s" % lib_dir
 
 if options.cflags:
-    print get_cflags()
+    print config.getCflags()
