@@ -632,17 +632,17 @@ vows.describe('mapcache').addBatch({
                 assert.strictEqual(response.code, 200);
             },
             'which has the correct headers': function (response) {
-                assert.includes(response.headers,  'Cache-Control');
-                assert.includes(response.headers,  'Expires');
+                /*assert.includes(response.headers,  'Cache-Control');
+                assert.includes(response.headers,  'Expires');*/
                 assert.deepEqual(response.headers['Content-Type'], [ 'image/png' ]);
             },
             'which returns binary image data': function (response) {
                 assert.isObject(response.data);
                 assert.isTrue(response.data.length > 0);
-            },
+            }/*,
             'which has a last modified timestamp': function (response) {
                 assert.instanceOf(response.mtime, Date);
-            }
+            }*/
         }
     }
 }).addBatch({
