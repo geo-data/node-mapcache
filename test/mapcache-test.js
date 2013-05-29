@@ -45,6 +45,21 @@ var vows = require('vows'),
     events = require('events'),
     mapcache = require('../lib/mapcache');
 
+function checkContentLength(response, expectedLength) {
+    assert.includes(response.headers, 'Content-Length');
+
+    if (arguments.length == 2) {
+        assert.deepEqual(response.headers['Content-Length'], [ expectedLength ]);
+    } else {
+	assert.isTrue(response.headers['Content-Length'][0] > 20); // ensure there are some bytes
+    }
+
+    // ensure the content length matches the data length
+    if (response.data) {
+	assert.equal(response.headers['Content-Length'][0], response.data.length);
+    }
+}
+
 vows.describe('mapcache').addBatch({
     // Ensure the module has the expected interface
 
@@ -457,9 +472,8 @@ vows.describe('mapcache').addBatch({
                 assert.strictEqual(response.code, 400);
             },
             'which has the correct headers': function (response) {
-                assert.deepEqual(response.headers,  {
-                    'Content-Type': [ 'application/vnd.ogc.se_xml' ]
-                });
+                assert.deepEqual(response.headers['Content-Type'], [ 'application/vnd.ogc.se_xml' ]);
+		checkContentLength(response);
             },
             'which returns XML data': function (response) {
                 assert.isObject(response.data);
@@ -493,9 +507,8 @@ vows.describe('mapcache').addBatch({
                 assert.strictEqual(response.code, 200);
             },
             'which has the correct headers': function (response) {
-                assert.deepEqual(response.headers,  {
-                    'Content-Type': [ 'text/xml' ]
-                });
+                assert.deepEqual(response.headers['Content-Type'], [ 'text/xml' ]);
+		checkContentLength(response);
             },
             'which returns XML data': function (response) {
                 assert.isObject(response.data);
@@ -529,6 +542,7 @@ vows.describe('mapcache').addBatch({
                 assert.includes(response.headers,  'Cache-Control');
                 assert.includes(response.headers,  'Expires');
                 assert.deepEqual(response.headers['Content-Type'], [ 'image/jpeg' ]);
+		checkContentLength(response, 30711);
             },
             'which returns binary image data': function (response) {
                 assert.isObject(response.data);
@@ -564,9 +578,8 @@ vows.describe('mapcache').addBatch({
                 assert.strictEqual(response.code, 404);
             },
             'which has the correct headers': function (response) {
-                assert.deepEqual(response.headers,  {
-                    'Content-Type': [ 'text/plain' ]
-                });
+                assert.deepEqual(response.headers['Content-Type'], [ 'text/plain' ])
+		checkContentLength(response);
             },
             'which returns data': function (response) {
                 assert.isObject(response.data);
@@ -599,9 +612,8 @@ vows.describe('mapcache').addBatch({
                 assert.strictEqual(response.code, 200);
             },
             'which has the correct headers': function (response) {
-                assert.deepEqual(response.headers,  {
-                    'Content-Type': [ 'text/xml' ]
-                });
+                assert.deepEqual(response.headers['Content-Type'], [ 'text/xml' ]);
+		checkContentLength(response);
             },
             'which returns XML data': function (response) {
                 assert.isObject(response.data);
@@ -635,6 +647,7 @@ vows.describe('mapcache').addBatch({
                 assert.includes(response.headers,  'Cache-Control');
                 assert.includes(response.headers,  'Expires');
                 assert.deepEqual(response.headers['Content-Type'], [ 'image/png' ]);
+		checkContentLength(response, 6111);
             },
             'which returns binary image data': function (response) {
                 assert.isObject(response.data);
@@ -670,9 +683,8 @@ vows.describe('mapcache').addBatch({
                 assert.strictEqual(response.code, 404);
             },
             'which has the correct headers': function (response) {
-                assert.deepEqual(response.headers,  {
-                    'Content-Type': [ 'text/plain' ]
-                });
+                assert.deepEqual(response.headers['Content-Type'], [ 'text/plain' ]);
+		checkContentLength(response);
             },
             'which returns data': function (response) {
                 assert.isObject(response.data);
@@ -706,6 +718,7 @@ vows.describe('mapcache').addBatch({
             },
             'which has the correct headers': function (response) {
                 assert.deepEqual(response.headers['Content-Type'], [ 'application/vnd.google-earth.kml+xml' ]);
+		checkContentLength(response);
             },
             'which returns XML data': function (response) {
                 assert.isObject(response.data);

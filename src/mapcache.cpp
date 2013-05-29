@@ -149,7 +149,7 @@ Handle<Value> MapCache::FromConfigFileAsync(const Arguments& args) {
 
   Local<Object> emitter;
   Local<Function> callback;
-  
+
   switch (args.Length()) {
   case 3:
     ASSIGN_OBJ_ARG(1, emitter);
@@ -394,17 +394,12 @@ void MapCache::GetRequestAfter(uv_work_t *req) {
       result->Set(mtime_symbol, Date::New(apr_time_as_msec(response->mtime)));
     }
 
-    // set the response data as a Node Buffer object
-    if (response->data) {
-      result->Set(data_symbol, Buffer::New((char *)response->data->buf, response->data->size)->handle_);
-    }
-
     // Set the response headers as a javascript object with header
     // names as keys and header values as an array. Header values are
     // in an array as more than one header of the same name can be
     // set.
+    Local<Object> headers = Object::New();
     if (response->headers && !apr_is_empty_table(response->headers)) {
-      Local<Object> headers = Object::New();
       const apr_array_header_t *elts = apr_table_elts(response->headers);
       int i;
       for (i = 0; i < elts->nelts; i++) {
@@ -423,7 +418,17 @@ void MapCache::GetRequestAfter(uv_work_t *req) {
           headers->Set(key, values);
         }
       }
-      result->Set(headers_symbol, headers);
+    }
+    result->Set(headers_symbol, headers);
+
+    // set the response data as a Node Buffer object
+    if (response->data) {
+      result->Set(data_symbol, Buffer::New((char *)response->data->buf, response->data->size)->handle_);
+
+      // add the content-length header
+      Local<Array> values = Array::New(1);
+      values->Set(0, Uint32::New(response->data->size));
+      headers->Set(String::New("Content-Length"), values);
     }
 
     argv[0] = Undefined();
