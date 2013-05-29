@@ -6,7 +6,7 @@
     "author": "Homme Zwaagstra <hrz@geodata.soton.ac.uk>",
     "name": "mapcache",
     "description": "A map tile caching solution using Mapserver Mapcache",
-    "version": "0.1.10",
+    "version": "0.1.11",
     "repository": {
         "type": "git",
         "url": "http://github.com/geo-data/node-mapcache.git"
