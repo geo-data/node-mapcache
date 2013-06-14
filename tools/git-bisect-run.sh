@@ -56,7 +56,7 @@ make && make install
 # build and test node-mapcache
 cd $NODE_MAPCACHE_DIR
 rm -rf build
-npm_config_mapcache_debug=true npm_config_mapcache_build_dir=$GIT_DIR ./node_modules/.bin/node-gyp configure build
+npm_config_mapcache_build_dir=$GIT_DIR ./node_modules/.bin/node-gyp --debug configure build
 ./node_modules/.bin/vows --spec ./test/mapcache-test.js
 EXIT=$?                         # get the exit status from vows
 

@@ -204,11 +204,6 @@ Installation
 
     `npm config set mapcache:build_dir /tmp/mapcache`
 
-* Optionally tell node-mapcache to be built in debug mode.  This provides more
-  verbose logging output as well as enabling compiler debugger flags:
-
-    `npm config set mapcache:debug true`
-
 * Get and install node-mapcache:
 
     `npm install mapcache`
@@ -228,8 +223,7 @@ instructions roughly translate to:
 
     npm install node-gyp
     npm_config_mapcache_build_dir=/tmp/mapcache \
-    npm_config_mapcache_debug=true \
-    ./node_modules/.bin/node-gyp configure build
+    ./node_modules/.bin/node-gyp --debug configure build
 
     npm install vows
     ./node_modules/.bin/vows --spec ./test/mapcache-test.js
