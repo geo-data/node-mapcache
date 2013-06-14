@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 ##
 # Mapcache regression testing script for use with `git bisect run`
@@ -33,18 +33,37 @@ NODE_MAPCACHE_DIR="$( dirname "$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 cd $GIT_DIR
 git status --short | cut -b 4- | xargs rm -rf
 if [ -f ./CMakeLists.txt ]; then # it's a cmake build
-    cmake CMakeLists.txt -DWITH_BERKELEY_DB=1 -DWITH_PIXMAN=1 -DWITH_FCGI=0 -DWITH_SQLITE=0 -DWITH_OGR=0 -DWITH_APACHE=0 -DCMAKE_PREFIX_PATH=${INSTALL_PREFIX}/ -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}/;
+    cmake CMakeLists.txt \
+        -DWITH_BERKELEY_DB=1 \
+        -DWITH_PIXMAN=1 \
+        -DCMAKE_PREFIX_PATH=${INSTALL_PREFIX}/ \
+        -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}/ \
+        -DWITH_FCGI=0 \
+        -DWITH_SQLITE=0 \
+        -DWITH_OGR=0 \
+        -DWITH_APACHE=0;
 else                            # it's an autotools build
-    ./configure --prefix=${INSTALL_PREFIX}/ --disable-module --without-sqlite --with-pixman=${INSTALL_PREFIX}/lib/pkgconfig/pixman-1.pc --with-bdb-dir=${INSTALL_PREFIX} --with-bdb --with-apxs=/usr/sbin/apxs; 
+    ./configure --prefix=${INSTALL_PREFIX}/ \
+        --disable-module \
+        --without-sqlite \
+        --with-pixman=${INSTALL_PREFIX}/lib/pkgconfig/pixman-1.pc \
+        --with-bdb \
+        --with-bdb-dir=${INSTALL_PREFIX} \
+        --with-apxs=/usr/sbin/apxs; 
 fi
 make && make install
 
-# build and test node mapcache
+# build and test node-mapcache
 cd $NODE_MAPCACHE_DIR
 rm -rf build
 npm_config_mapcache_debug=true npm_config_mapcache_build_dir=$GIT_DIR ./node_modules/.bin/node-gyp configure build
 ./node_modules/.bin/vows --spec ./test/mapcache-test.js
 EXIT=$?                         # get the exit status from vows
+
+# Ensure segmentation faults are tested for: `git bisect run` fails when there
+# is an exit code >= 129 - segmentation faults return 139 so we must downgrade
+# them
+if [ $EXIT -eq 139 ]; then EXIT=2; fi;
 
 # clean up
 cd $GIT_DIR

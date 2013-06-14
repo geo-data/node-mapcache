@@ -28,7 +28,14 @@ fi
 
 # build and install mapcache
 if [ -f ./CMakeLists.txt ]; then # it's a cmake build
-    cmake CMakeLists.txt -DWITH_FCGI=0 -DWITH_SQLITE=0 -DWITH_GDAL=0 -DWITH_OGR=0 -DWITH_GEOS=0 -DWITH_APACHE=0 -DCMAKE_INSTALL_PREFIX=${PREFIX}/mapcache-install || die "cmake failed"
+    cmake CMakeLists.txt \
+        -DWITH_FCGI=0 \
+        -DWITH_SQLITE=0 \
+        -DWITH_GDAL=0 \
+        -DWITH_OGR=0 \
+        -DWITH_GEOS=0 \
+        -DWITH_APACHE=0 \
+        -DCMAKE_INSTALL_PREFIX=${PREFIX}/mapcache-install || die "cmake failed"
 else                            # it's an autotools build
     autoreconf --force --install || die "autoreconf failed"
     ./configure --prefix=${PREFIX}/mapcache-install --without-sqlite --without-bdb --disable-module || die "configure failed"
@@ -37,5 +44,5 @@ fi
 make || die "make failed"
 make install || die "make install failed"
 
-# point NPM at the build
+# point `npm` at the build
 npm config set mapcache:build_dir ${PREFIX}/mapcache

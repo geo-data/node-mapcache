@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python2
 
 ##############################################################################
@@ -38,6 +37,13 @@ config set`.  This allows for a simple `npm install mapcache` to work.
 from optparse import OptionParser
 import os
 import re
+
+def warn(msg):
+    print >> sys.stderr, msg
+
+def die(msg):
+    warn('Configuration failed: %s' % msg)
+    sys.exit(1)
 
 class ConfigError(Exception):
     pass
@@ -167,28 +173,38 @@ parser.add_option("--cflags",
 try:
     build_dir = os.environ['npm_config_mapcache_build_dir']
 except KeyError:
-    raise EnvironmentError('`npm config set mapcache:build_dir` has not been called')
+    die('`npm config set mapcache:build_dir` has not been called')
 
-# get the config object, trying the legacy autoconf build sytem first and
-# falling back to the new cmake system
+# get the config object, trying the new cmake system first and falling back to
+# the legacy autoconf build sytem
 try:
-    config = AutoconfConfig(build_dir)
-except ConfigError:
-    config = CmakeConfig(build_dir)
+    try:
+        config = CmakeConfig(build_dir)
+    except ConfigError, e:
+        try:
+            config = AutoconfConfig(build_dir)
+        except ConfigError, e2:
+            warn("Failed to configure using Cmake: %s" % e)
+            warn("Attempting configuration using autotools...")
+            die(e2)
 
-if options.include:
-    print config.getIncludeDir()
+    # output the requested options
+    if options.include:
+        print config.getIncludeDir()
 
-if options.libraries:
-    lib_dir = config.getLibDir()
-    if lib_dir:
-        print "-L%s" % lib_dir
+    if options.libraries:
+        lib_dir = config.getLibDir()
+        if lib_dir:
+            print "-L%s" % lib_dir
 
-if options.ldflags:
-    # write the library path into the resulting binary
-    lib_dir = config.getLibDir()
-    if lib_dir:
-        print "-Wl,-rpath=%s" % lib_dir
+    if options.ldflags:
+        # write the library path into the resulting binary
+        lib_dir = config.getLibDir()
+        if lib_dir:
+            print "-Wl,-rpath=%s" % lib_dir
 
-if options.cflags:
-    print config.getCflags()
+    if options.cflags:
+        print config.getCflags()
+
+except ConfigError, e:
+    die(e)
