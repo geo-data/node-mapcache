@@ -37,6 +37,7 @@ config set`.  This allows for a simple `npm install mapcache` to work.
 from optparse import OptionParser
 import os
 import re
+import sys
 
 def warn(msg):
     print >> sys.stderr, msg
@@ -138,15 +139,19 @@ class CmakeConfig(Config):
 
     def getIncludeDir(self):
         dirs = [os.path.join(self.build_dir, 'include')]
-        p = re.compile('^\w+_INCLUDE_DIR:PATH *= *(.+)$') # match a library directory
+        patterns = [ # a list of path patterns associated with paths to append to matches
+            (re.compile('^\w+_INCLUDE_DIR:PATH *= *(.+)$'), ), # match a library directory
+            (re.compile('^MapCache_SOURCE_DIR:STATIC *= *(.+)$'), 'include') # match the source directory
+            ]
 
         with open(self.cmake_cache, 'r') as f:
             for line in f:
-                match = p.match(line)
-                if match:
-                    arg = match.groups()[0].strip()
-                    if arg:
-                        dirs.append(arg)
+                for p in patterns:
+                    match = p[0].match(line)
+                    if match:
+                        arg = match.groups()[0].strip()
+                        if arg:
+                            dirs.append(os.path.join(arg, *p[1:]))
 
         return ' '.join(dirs)
 
