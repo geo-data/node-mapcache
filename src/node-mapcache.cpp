@@ -46,6 +46,7 @@
  * details.
  */
 
+#include <stdlib.h>
 #include "mapcache.hpp"
 
 /** Clean up at module exit.
@@ -55,11 +56,9 @@
  * the `MapCache` class.
  *
  * The function signature is suitable for using passing it to the
- * `Node::AtExit` function.
- *
- * @param arg Not currently used.
+ * `atexit` function.
  */
-static void Cleanup(void* arg) {
+static void cleanup(void) {
   MapCache::Destroy();
 }
 
@@ -101,7 +100,7 @@ extern "C" {
     NODE_MAPCACHE_CONSTANT(logLevels, EMERG, MAPCACHE_EMERG);
     target->Set(String::NewSymbol("logLevels"), logLevels);
 
-    AtExit(Cleanup);
+    atexit(cleanup);            // clean up on normal exit
   }
 }
 
