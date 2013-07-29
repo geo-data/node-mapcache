@@ -1,5 +1,4 @@
-Node.js MapCache Tile Caching Module
-====================================
+# Node.js MapCache Tile Caching Module
 
 [![Build Status](https://secure.travis-ci.org/geo-data/node-mapcache.png)](http://travis-ci.org/geo-data/node-mapcache)
 
@@ -16,10 +15,12 @@ possible from Node with the following advantages:
   allowing fine tuning of things like HTTP caching. URL end points can be
   defined as required.
 * **Robustness**: The module has a suite of tests that exercises the whole
-  API. This suite has been run through Valgrind to check for memory leaks.
+  API. The tests provide 83% line coverage and 85% function coverage; excluded
+  code generally handles hard to replicate edge cases (e.g. memory
+  exhaustion). This suite has been run through Valgrind to check for memory
+  leaks.
 
-Usage
------
+## Usage
 
 The `node-mapcache` API is designed to be simple but flexible.  It binds into
 the underlying `libmapcache` library before the HTTP layer and around the
@@ -108,8 +109,7 @@ Versioning information is also available:
   apr: '1.4.5' }
 ```
 
-Example
--------
+### Example
 
 This provides an example of how to use the MapCache module in combination with
 the Node HTTP module to create a tile caching server. It is available in the
@@ -179,8 +179,7 @@ mapcache.MapCache.FromConfigFile(conffile, logger, function handleCache(err, cac
 Another example is provided as `examples/display.js` which pipes the output of
 a cache request to the ImageMagick `display` program.
 
-Requirements
-------------
+## Requirements
 
 * Linux OS (although it should work on other Unices and ports to Windows and
   other platforms supported by both Node and Mapserver should be possible:
@@ -190,8 +189,7 @@ Requirements
 
 * Mapserver MapCache 0.5-dev >= commit 11e8509
 
-Installation
-------------
+## Installation
 
 * Ensure [Mapserver Mapcache](http://www.mapserver.org/trunk/mapcache) is
   installed.  It should be built from source as we need the build directory in
@@ -208,28 +206,11 @@ Installation
 
     `npm install mapcache`
 
-* Optionally test that everything is working as expected
-  (recommended):
+* Optionally test that everything is working as expected (recommended):
 
    `npm test mapcache`
 
-Alternatively if you are developing or debugging you can bypass `npm` and use
-`node-gyp` directly (which `npm` itself calls).  `node-gyp` has various useful
-flags not available to `npm`.  For the latest repository version, the above
-instructions roughly translate to:
-
-    git clone https://github.com/geo-data/node-mapcache.git
-    cd node-mapcache
-
-    npm install node-gyp
-    npm_config_mapcache_build_dir=/tmp/mapcache \
-    ./node_modules/.bin/node-gyp --debug configure build
-
-    npm install vows
-    ./node_modules/.bin/vows --spec ./test/mapcache-test.js
-    
-Recommendations
----------------
+## Recommendations
 
 * If you want raw speed use the Apache Mapcache module or reverse proxy your
   `node-mapcache` app with a web accelerator such as Varnish.  Having said that
@@ -244,24 +225,59 @@ Recommendations
 * Check out [`node-mapserv`](https://npmjs.org/package/mapserv): this can work
   well in combination with `node-mapcache` for generating tiled maps.
 
-Bugs
-----
+## Contributing
+
+Fork the code on GitHub or clone it:
+
+    git clone https://github.com/geo-data/node-mapcache.git
+    cd node-mapcache
+
+Build the module in Debug mode using:
+
+    make build
+
+By default this uses the mapcache build directory previously specified using
+`npm config set mapcache:build_dir`; to override this do something along the
+following lines:
+
+    make build npm_config_mapcache_build_dir=/tmp/mapcache
+
+You may want to ensure you're building in a clean source tree in which case:
+
+    make clean
+
+Add tests for your changes to `test/mapcache-test.js` and run them:
+
+    make test
+
+Perform code coverage analysis to ensure all code paths in your changes are
+tested (this requires `lcov`(http://ltp.sourceforge.net/coverage/lcov.php) be
+installed):
+
+    make cover
+
+Finally run the test suite through `valgrind` to ensure you haven't introduced
+any memory issues:
+
+    make valgrind
+
+And issue your pull request or patch...
+
+### Documentation
+
+Doxygen based documentation is available for the C++ bindings:
+
+    make doc
+
+## Bugs
 
 Please add bugs or issues to the
 [GitHub issue tracker](https://github.com/geo-data/node-mapcache).
 
-Documentation
--------------
+## Licence
 
-Doxygen based documentation is available for the C++ bindings. See
-`doc/README.md` for details.
+[BSD 2-Clause](http://opensource.org/licenses/BSD-2-Clause).
 
-Licence
--------
-
-BSD 2-Clause (http://opensource.org/licenses/BSD-2-Clause).
-
-Contact
--------
+## Contact
 
 Homme Zwaagstra <hrz@geodata.soton.ac.uk>

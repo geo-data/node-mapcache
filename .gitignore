@@ -1,6 +1,8 @@
 node_modules/
 build/
+coverage/
 .lock-wscript
 mapcache-*.tgz
+doc/.made
 doc/html
 doc/latex
