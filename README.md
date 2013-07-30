@@ -15,7 +15,7 @@ possible from Node with the following advantages:
   allowing fine tuning of things like HTTP caching. URL end points can be
   defined as required.
 * **Robustness**: The module has a suite of tests that exercises the whole
-  API. The tests provide 83% line coverage and 85% function coverage; excluded
+  API. The tests provide 88% line coverage and 91% function coverage; excluded
   code generally handles hard to replicate edge cases (e.g. memory
   exhaustion). This suite has been run through Valgrind to check for memory
   leaks.
