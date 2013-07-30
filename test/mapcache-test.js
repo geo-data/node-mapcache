@@ -192,12 +192,6 @@ vows.describe('mapcache').addBatch({
             'which contains the `emerg` level': function (logLevels) {
                 assert.isNumber(logLevels.EMERG);
             }
-        },
-        'should have': {
-            topic: mapcache.httpCacheHandler,
-            'a `httpCacheHandler`': function (httpCacheHandler) {
-                assert.isFunction(httpCacheHandler);
-            }
         }
     }
 }).addBatch({
