@@ -109,6 +109,16 @@ vows.describe('mapcache').addBatch({
                     }
                     assert.instanceOf(err, Error);
                     assert.equal(err.message, 'MapCache() is expected to be called as a constructor with the `new` keyword');
+                },
+                'which requires the correct number of arguments': function (MapCache) {
+                    var err;
+                    try {
+                        err = new MapCache('yes', 'ok', 'oops!'); // only accepts two arguments
+                    } catch (e) {
+                        err = e;
+                    }
+                    assert.instanceOf(err, Error);
+                    assert.equal(err.message, 'usage: new MapCache(config, [logger])');
                 }
             }
         },
@@ -552,6 +562,37 @@ vows.describe('mapcache').addBatch({
                 assert.instanceOf(response.mtime, Date);
             }
         }
+    },
+    'a WMS `GetFeatureInfo` request': {
+        topic: function () {
+            var self = this;
+            mapcache.MapCache.FromConfigFile(path.join(__dirname, 'good.xml'), function (err, cache) {
+                if (err) {
+                    return self.callback(err, null);
+                }
+                return cache.get(
+                    'http://localhost:3000',
+                    '/',
+                    'SERVICE=WMS&REQUEST=GetFeatureInfo&VERSION=1.1.1&SRS=EPSG%3A4326&BBOX=-180,-90,180,90&WIDTH=400&HEIGHT=400&QUERY_LAYERS=basic&X=200&Y=200&INFO_FORMAT=text/plain',
+                    self.callback);
+            });
+        },
+        'returns a response': {
+            'which is an object': function (response) {
+                assert.instanceOf(response, Object);
+            },
+            'which has a 200 reponse code': function (response) {
+                assert.strictEqual(response.code, 200);
+            },
+            'which has the correct headers': function (response) {
+                assert.deepEqual(response.headers['Content-Type'], [ 'text/plain' ]);
+		checkContentLength(response);
+            },
+            'which returns data': function (response) {
+                assert.isObject(response.data);
+                assert.isTrue(response.data.length > 0);
+            }
+        }
     }
 }).addBatch({
     // Ensure retrieving mapcache TMS resources works as expected
@@ -738,10 +779,17 @@ vows.describe('mapcache').addBatch({
                     logger.emit('error', new Error('No log was emitted'));
                 }, 2000);
 
-            logger.once('log', function(level, msg) {
+            function log(level, msg) {
                 clearTimeout(timeout);
-                promise.emit('success', level, msg);
-            });
+
+                // ignore all levels bar ERROR.
+                if (level == mapcache.logLevels.ERROR) {
+                    promise.emit('success', level, msg);
+                    logger.removeListener('log', log); // we've done our job
+                }
+            }
+
+            logger.on('log', log);
 
             mapcache.MapCache.FromConfigFile(path.join(__dirname, 'good.xml'), logger, function (err, cache) {
                 if (err) {

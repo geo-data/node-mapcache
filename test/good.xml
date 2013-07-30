@@ -20,6 +20,26 @@
          <url>http://vmap0.tiles.osgeo.org/wms/vmap0</url>
       </http>
    </source>
+
+   <source name="basic" type="wms">
+      <http>
+         <url>http://geoservices.brgm.fr/geologie?</url>
+      </http>
+      <getmap>
+         <params>
+            <FORMAT>image/png</FORMAT>
+            <LAYERS>GRAVI_BASE</LAYERS>
+            <TRANSPARENT>true</TRANSPARENT>
+         </params>
+      </getmap>
+
+      <getfeatureinfo>
+         <info_formats>text/plain,application/vnd.ogc.gml</info_formats>
+         <params>
+            <QUERY_LAYERS>GRAVI_BASE</QUERY_LAYERS>
+         </params>
+      </getfeatureinfo>
+   </source>
    
    <tileset name="test">
       <source>vmap0</source>
@@ -32,6 +52,16 @@
       <expires>3600</expires>
    </tileset>
 
+   <tileset name="basic">
+      <source>basic</source>
+      <cache>disk</cache>
+      <grid>WGS84</grid>
+      <grid>g</grid>
+      <format>PNG</format>
+      <metatile>5 5</metatile>
+      <metabuffer>10</metabuffer>
+      <expires>3600</expires>
+   </tileset>
 
    <default_format>JPEG</default_format>
 
