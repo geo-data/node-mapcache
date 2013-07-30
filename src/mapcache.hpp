@@ -34,7 +34,7 @@
  */
 
 /// The node-mapcache version string
-#define NODE_MAPCACHE_VERSION "0.1.11"
+#define NODE_MAPCACHE_VERSION "0.1.12"
 
 // Standard headers
 #include <string>
