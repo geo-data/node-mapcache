@@ -251,7 +251,7 @@ Add tests for your changes to `test/mapcache-test.js` and run them:
     make test
 
 Perform code coverage analysis to ensure all code paths in your changes are
-tested (this requires `lcov`(http://ltp.sourceforge.net/coverage/lcov.php) be
+tested (this requires [`lcov`](http://ltp.sourceforge.net/coverage/lcov.php) be
 installed):
 
     make cover
