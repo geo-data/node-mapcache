@@ -35,13 +35,14 @@ RUN apt-get install -y git \
     libgdal-dev \
     libgeos-dev \
     libsqlite3-dev \
+    libdb-dev \
     libtiff4-dev
 
 # Install Mapcache itself
 RUN git clone https://github.com/mapserver/mapcache/ /usr/local/src/mapcache
 RUN mkdir /usr/local/src/mapcache/build && \
     cd /usr/local/src/mapcache/build && \
-    cmake ../ -DWITH_FCGI=0 -DWITH_APACHE=0 -DWITH_PCRE=1 -DWITH_TIFF=1 && \
+    cmake ../ -DWITH_FCGI=0 -DWITH_APACHE=0 -DWITH_PCRE=1 -DWITH_TIFF=1 -DWITH_BERKELEY_DB=1 -DWITH_MEMCACHE=1 && \
     make && \
     make install
 
