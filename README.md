@@ -191,6 +191,11 @@ a cache request to the ImageMagick `display` program.
 
 ## Installation
 
+### Using NPM
+
+The latest stable release of Node Mapcache is available via the Node
+Package Manager:
+
 * Ensure [Mapserver Mapcache](http://www.mapserver.org/trunk/mapcache) is
   installed.  It should be built from source as we need the build directory in
   the next step:
@@ -209,6 +214,40 @@ a cache request to the ImageMagick `display` program.
 * Optionally test that everything is working as expected (recommended):
 
    `npm test mapcache`
+
+### Using Docker
+
+Assuming you have [Docker](http://www.docker.io/) available on your
+system, the following command will obtain a docker image with the
+latest Node Mapcache code from git built against the latest Mapserver
+Mapcache git checkout:
+
+    docker pull homme/node-mapcache:latest
+
+Note that the latest Mapcache git checkout is the latest **at the time
+the image was built**.  If you want the absolute latest code of both
+Node Mapcache *and* Mapcache, build the docker image yourself locally
+along these lines:
+
+    docker build -t homme/node-mapcache:latest https://raw.github.com/geo-data/node-mapcache/master/docker/latest/Dockerfile
+
+By default the image runs the Node Mapcache tests:
+
+    docker run homme/node-mapcache:latest
+
+Running Node directly from the image allows you to `require()` and
+play around with Node Mapcache interactively:
+
+    docker run -t -i homme/node-mapcache:latest /usr/bin/node
+    > var mapcache = require('mapcache');
+    undefined
+    > mapcache.versions
+    { node_mapcache: '0.1.12',
+      mapcache: '1.3dev',
+      apr: '1.4.6' }
+
+See the [Docker Index](https://index.docker.io/u/homme/node-mapcache/)
+for further information.
 
 ## Recommendations
 
