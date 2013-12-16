@@ -682,7 +682,7 @@ vows.describe('mapcache').addBatch({
                 assert.includes(response.headers,  'Cache-Control');
                 assert.includes(response.headers,  'Expires');
                 assert.deepEqual(response.headers['Content-Type'], [ 'image/png' ]);
-		checkContentLength(response, 6111);
+		checkContentLength(response);
             },
             'which returns binary image data': function (response) {
                 assert.isObject(response.data);
