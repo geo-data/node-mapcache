@@ -16,8 +16,7 @@
         "node": ">=0.8"
     },
     "scripts": {
-        "pretest": "npm install vows",
-        "test": "./node_modules/.bin/vows --spec ./test/mapcache-test.js"
+        "test": "vows --spec ./test/mapcache-test.js"
     },
     "dependencies": {},
     "devDependencies": {
