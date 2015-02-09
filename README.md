@@ -185,7 +185,7 @@ a cache request to the ImageMagick `display` program.
   other platforms supported by both Node and Mapserver should be possible:
   patches welcome!)
   
-* Node.js >=0.10
+* Node.js 0.10 (Not yet working with 0.12)
 
 * Mapserver MapCache 0.5-dev >= commit 11e8509
 
